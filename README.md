@@ -21,10 +21,14 @@
 
 ## 📦 使用
 
-1. 下载 `DeepSeek Harness-Setup-1.0.0.exe` 并运行
-2. 从桌面/开始菜单打开「DeepSeek Harness」
-3. 首次使用：**Settings → Models** 填入 DeepSeek API Key
-4. 点击 **Choose workspace** 选择工作目录，开始使用
+1. 从 [Releases](https://github.com/cnskycn/deepseek-harness-desktop/releases) 下载最新安装包：
+
+   [![Download](https://img.shields.io/badge/download-DeepSeek%20Harness%20v1.0.0-blue?style=for-the-badge&logo=windows)](https://github.com/cnskycn/deepseek-harness-desktop/releases/download/v1.0.0/DeepSeek.Harness-Setup-1.0.0.exe)
+
+2. 运行安装包（安装后自动创建桌面/开始菜单快捷方式）
+3. 打开「DeepSeek Harness」
+4. 首次使用：**Settings → Models** 填入 DeepSeek API Key
+5. 点击 **Choose workspace** 选择工作目录，开始使用
 
 > **依赖**：Node.js ≥ 22.19（需支持 `node:zlib` 的 zstd，Node 22.15+/24 提供）。
 > 安装包不内置 Node.js——缺失时会自动引导安装。
