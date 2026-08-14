@@ -8,3 +8,7 @@ resources/.cache/
 .dsh-home-test/
 dsh-hometest/
 .playwright-cli/
+gh-*.txt
+gh-*.json
+plugins-*.md
+*.dump.txt
