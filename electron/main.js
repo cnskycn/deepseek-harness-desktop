@@ -1,0 +1,420 @@
+'use strict'
+
+const { app, BrowserWindow, shell, dialog } = require('electron')
+const { spawn, spawnSync } = require('child_process')
+const path = require('path')
+const fs = require('fs')
+const http = require('http')
+
+const DEFAULT_HOST = '127.0.0.1'
+const DEFAULT_PORT = 3080
+const STARTUP_TIMEOUT_MS = 180000
+const MIN_NODE_VERSION = '22.19.0'
+
+let serverProc = null
+let mainWindow = null
+let serverUrl = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`
+let serverLogs = ''
+let nodeCommand = 'node'
+
+const isWin = process.platform === 'win32'
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+/* ---------------- Node.js 检测 ---------------- */
+
+function runCapture(cmd, args) {
+  try {
+    const r = spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true })
+    return {
+      ok: r.status === 0,
+      out: (r.stdout || '').trim(),
+      err: (r.stderr || '').trim(),
+    }
+  } catch (e) {
+    return { ok: false, out: '', err: String(e) }
+  }
+}
+
+function findSystemNode() {
+  // 1. 依赖 PATH
+  const t = runCapture(isWin ? 'where' : 'which', ['node'])
+  if (t.ok && t.out) {
+    const first = t.out.split(/\r?\n/)[0].trim()
+    if (first) return first
+  }
+  // 2. 常见安装位置
+  const pf = process.env.ProgramFiles || 'C:\\Program Files'
+  const pfx = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
+  const localAppData = process.env.LOCALAPPDATA || ''
+  const candidates = [
+    path.join(pf, 'nodejs', 'node.exe'),
+    path.join(pfx, 'nodejs', 'node.exe'),
+    path.join(localAppData, 'Programs', 'nodejs', 'node.exe'),
+    'C:\\Program Files\\nodejs\\node.exe',
+    'C:\\Program Files (x86)\\nodejs\\node.exe',
+  ]
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c
+  }
+  // 3. 注册表
+  if (isWin) {
+    for (const hive of ['HKLM', 'HKCU']) {
+      const reg = runCapture('reg', ['query', hive + '\\SOFTWARE\\Node.js', '/v', 'InstallDir'])
+      const m = reg.out.match(/REG_SZ\s+(.+)/)
+      if (m) {
+        const p = path.join(m[1].trim(), 'node.exe')
+        if (fs.existsSync(p)) return p
+      }
+    }
+  }
+  return null
+}
+
+function nodeVersion(cmd) {
+  const r = runCapture(cmd, ['-v'])
+  const v = r.out.replace(/^v/, '').trim()
+  return v || null
+}
+
+/**
+ * dsh 依赖 node:zlib 的 zstd 能力（createZstdDecompress），
+ * 该 API 于 Node 22.15+ / 24 提供。这里做实际能力检测，比版本号更可靠。
+ */
+function nodeHasZstd(cmd) {
+  const r = runCapture(cmd, [
+    '-e',
+    'process.stdout.write(typeof require("node:zlib").createZstdDecompress)',
+  ])
+  return r.ok && r.out === 'function'
+}
+
+function versionGte(a, b) {
+  const A = String(a).split('.').map((n) => parseInt(n, 10) || 0)
+  const B = String(b).split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const x = A[i] || 0
+    const y = B[i] || 0
+    if (x > y) return true
+    if (x < y) return false
+  }
+  return true
+}
+
+function tryInstallNodeViaWinget() {
+  return new Promise((resolve) => {
+    const w = runCapture('winget', ['--version'])
+    if (!w.ok) {
+      shell.openExternal('https://nodejs.org/zh-cn/download')
+      resolve()
+      return
+    }
+    const child = spawn(
+      'winget',
+      [
+        'install',
+        'OpenJS.NodeJS.LTS',
+        '--silent',
+        '--accept-package-agreements',
+        '--accept-source-agreements',
+        '--disable-interactivity',
+      ],
+      { windowsHide: true, stdio: 'ignore' }
+    )
+    let done = false
+    const finish = () => {
+      if (!done) {
+        done = true
+        resolve()
+      }
+    }
+    child.on('exit', finish)
+    child.on('error', finish)
+    setTimeout(finish, 180000)
+  })
+}
+
+/**
+ * 确保系统存在可用的 Node.js（>= 22.19 且支持 zstd），否则弹窗引导安装。
+ * 返回 node 可执行文件路径（或 'node'），失败返回 null 并退出应用。
+ */
+async function ensureNode() {
+  for (;;) {
+    const found = findSystemNode()
+    if (found) {
+      const v = nodeVersion(found)
+      const hasZstd = found ? nodeHasZstd(found) : false
+      if (v && versionGte(v, MIN_NODE_VERSION) && hasZstd) return found
+
+      const r = await dialog.showMessageBox({
+        type: 'warning',
+        buttons: ['仍然继续', '升级 Node.js', '退出'],
+        defaultId: 1,
+        cancelId: 2,
+        title: 'Node.js 版本过低',
+        message: `检测到 Node.js ${v || '未知'}，dsh 需要 ${MIN_NODE_VERSION} 及以上（含 zstd 支持）。`,
+        detail: '建议升级到 Node.js 22 LTS（≥22.19）或 24 LTS。',
+      })
+      if (r.response === 0) return found
+      if (r.response === 1) {
+        await tryInstallNodeViaWinget()
+        continue
+      }
+      app.quit()
+      return null
+    }
+
+    const r = await dialog.showMessageBox({
+      type: 'info',
+      buttons: ['自动安装 Node.js', '打开官网下载', '退出'],
+      defaultId: 0,
+      cancelId: 2,
+      title: '未检测到 Node.js',
+      message: 'DeepSeek Harness 需要 Node.js 运行时。',
+      detail:
+        '可选择自动安装（调用 winget，可能弹出用户账户控制提示），或前往 nodejs.org 手动下载安装。',
+    })
+    if (r.response === 0) {
+      await tryInstallNodeViaWinget()
+      continue
+    }
+    if (r.response === 1) {
+      shell.openExternal('https://nodejs.org/zh-cn/download')
+      await sleep(3000)
+      continue
+    }
+    app.quit()
+    return null
+  }
+}
+
+/* ---------------- dsh 服务管理 ---------------- */
+
+function dshBinPath() {
+  const resDir = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..', 'resources')
+  return path.join(resDir, 'dsh', 'runtime', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+}
+
+function workspaceDir() {
+  const dir = process.env.DSH_WORKSPACE || path.join(app.getPath('documents'), 'DeepSeekHarness')
+  try {
+    fs.mkdirSync(dir, { recursive: true })
+  } catch (_) {}
+  return dir
+}
+
+function checkHttp(url) {
+  return new Promise((resolve) => {
+    const req = http.get(url, (res) => {
+      res.resume()
+      resolve(true)
+    })
+    req.on('error', () => resolve(false))
+    req.setTimeout(2000, () => {
+      req.destroy()
+      resolve(false)
+    })
+  })
+}
+
+async function waitForServer(url, timeoutMs = STARTUP_TIMEOUT_MS) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    if (await checkHttp(url)) return true
+    await sleep(500)
+  }
+  return false
+}
+
+function sendLog(text) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('server-log', text)
+  }
+}
+
+function startServer() {
+  const dshBin = dshBinPath()
+  if (!fs.existsSync(dshBin)) {
+    dialog.showErrorBox('运行时缺失', '未找到内置的 dsh，安装可能不完整。\n请重新运行安装程序。')
+    return false
+  }
+
+  serverLogs = ''
+  const cwd = workspaceDir()
+
+  serverProc = spawn(nodeCommand, [dshBin, 'web'], {
+    cwd,
+    env: { ...process.env },
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  serverProc.stdout.on('data', (d) => {
+    const s = d.toString()
+    serverLogs += s
+    sendLog(serverLogs)
+    const m = s.match(/https?:\/\/[^\s"'<>]+/)
+    if (m) {
+      serverUrl = m[0].replace(/\/+$/, '')
+    }
+  })
+
+  serverProc.stderr.on('data', (d) => {
+    serverLogs += d.toString()
+    sendLog(serverLogs)
+  })
+
+  serverProc.on('error', (err) => {
+    serverLogs += '\n[进程错误] ' + err.message + '\n'
+    sendLog(serverLogs)
+  })
+
+  serverProc.on('exit', (code) => {
+    serverProc = null
+    sendLog(serverLogs + `\n[dsh 已退出，code=${code}]\n`)
+  })
+
+  return true
+}
+
+/* ---------------- 窗口 ---------------- */
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 940,
+    minHeight: 620,
+    backgroundColor: '#0b0f1a',
+    title: 'DeepSeek Harness',
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  })
+
+  mainWindow.loadFile(path.join(__dirname, 'loading.html'))
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost')) {
+      return { action: 'allow' }
+    }
+    shell.openExternal(url)
+    return { action: 'deny' }
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+}
+
+async function boot() {
+  createWindow()
+
+  nodeCommand = await ensureNode()
+  if (!nodeCommand) return
+
+  // 端口已被其他程序占用（可能是残留的 dsh 实例或别的程序）。
+  if (await checkHttp(serverUrl)) {
+    const r = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['关闭占用进程并重启', '直接连接现有服务', '退出'],
+      defaultId: 0,
+      cancelId: 2,
+      title: '端口 3080 已被占用',
+      message: `检测到 ${serverUrl} 已有服务在运行。`,
+      detail:
+        '为避免连接到残留/异常实例导致插件加载失败，建议关闭占用进程后由本应用重新启动 dsh。',
+    })
+    if (r.response === 0) {
+      if (isWin) {
+        const out = require('child_process').execSync(
+          `netstat -ano | findstr :${DEFAULT_PORT} | findstr LISTENING`
+        )
+        const lines = (out || '').toString().split(/\r?\n/)
+        const pids = new Set()
+        for (const line of lines) {
+          const pid = line.trim().split(/\s+/).pop()
+          if (pid && /^\d+$/.test(pid) && pid !== String(process.pid)) pids.add(pid)
+        }
+        for (const pid of pids) {
+          try {
+            spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true })
+          } catch (_) {}
+        }
+        await sleep(1500)
+      }
+    } else if (r.response === 1) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.loadURL(serverUrl)
+      }
+      return
+    } else {
+      app.quit()
+      return
+    }
+  }
+
+  // 桌面应用独占 3080 服务：总是由本进程启动一个干净、全新的 dsh 实例，
+  // 避免连接到端口上残留/半死的旧实例导致插件加载异常。
+  if (serverProc) return
+  if (!startServer()) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadFile(path.join(__dirname, 'error.html'))
+    }
+    return
+  }
+
+  const ready = await waitForServer(serverUrl)
+
+  if (ready && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.loadURL(serverUrl)
+  } else if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.loadFile(path.join(__dirname, 'error.html'))
+  }
+}
+
+function stopServer() {
+  if (serverProc) {
+    try {
+      if (isWin) {
+        spawn('taskkill', ['/pid', String(serverProc.pid), '/T', '/F'], { windowsHide: true })
+      } else {
+        serverProc.kill('SIGTERM')
+      }
+    } catch (_) {}
+    serverProc = null
+  }
+}
+
+/* ---------------- 应用生命周期 ---------------- */
+
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+    }
+  })
+
+  app.whenReady().then(boot)
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) boot()
+  })
+
+  app.on('window-all-closed', () => {
+    stopServer()
+    if (process.platform !== 'darwin') app.quit()
+  })
+
+  app.on('before-quit', () => stopServer())
+}

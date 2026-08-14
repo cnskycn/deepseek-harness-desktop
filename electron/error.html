@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline';" />
+    <title>DeepSeek Harness 启动失败</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        min-height: 100vh;
+        padding: 48px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: radial-gradient(1200px 700px at 50% -10%, #2a1620 0%, #0b0f1a 60%, #080b12 100%);
+        font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+        color: #e6ebf5;
+      }
+      .dot { width: 60px; height: 60px; border-radius: 50%; background: rgba(255, 99, 132, 0.15); display: flex; align-items: center; justify-content: center; font-size: 30px; }
+      h1 { font-size: 20px; font-weight: 600; }
+      p { color: #9aa3b5; font-size: 14px; max-width: 620px; text-align: center; line-height: 1.7; }
+      pre {
+        width: 100%;
+        max-width: 720px;
+        max-height: 280px;
+        overflow: auto;
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 10px;
+        padding: 16px;
+        font-size: 12px;
+        color: #c7cfdd;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 22px;
+        background: #5b8cff;
+        color: #fff;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      button:hover { background: #6d99ff; }
+      .hint { color: #6b7486; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="dot">!</div>
+    <h1>无法启动 DeepSeek Harness</h1>
+    <p>内置的 dsh 服务未能正常启动。请检查下方日志，或确认端口 3080 未被其他程序占用。</p>
+    <pre id="log">（暂无日志）</pre>
+    <button onclick="window.location.reload()">重试</button>
+    <span class="hint">如需帮助，可前往 https://github.com/deepseek-ai/deepseek-harness</span>
+    <script>
+      const logEl = document.getElementById('log')
+      if (window.dshDesktop && window.dshDesktop.onLog) {
+        window.dshDesktop.onLog(function (text) {
+          logEl.textContent = text || '（暂无日志）'
+          logEl.scrollTop = logEl.scrollHeight
+        })
+      }
+    </script>
+  </body>
+</html>

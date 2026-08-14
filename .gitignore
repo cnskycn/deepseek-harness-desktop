@@ -1,0 +1,10 @@
+node_modules/
+dist/
+resources/node/
+resources/dsh/
+resources/.cache/
+*.log
+.DS_Store
+.dsh-home-test/
+dsh-hometest/
+.playwright-cli/

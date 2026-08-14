@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline';" />
+    <title>正在启动 DeepSeek Harness</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+        background: radial-gradient(1200px 700px at 50% -10%, #14203a 0%, #0b0f1a 60%, #080b12 100%);
+        font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+        color: #e6ebf5;
+      }
+      .spinner {
+        width: 64px; height: 64px;
+        border-radius: 50%;
+        border: 3px solid rgba(120, 150, 220, 0.18);
+        border-top-color: #5b8cff;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.5px; }
+      p { color: #8b96ad; font-size: 14px; }
+      .badge {
+        padding: 4px 12px;
+        border-radius: 999px;
+        background: rgba(91, 140, 255, 0.14);
+        color: #9db9ff;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="spinner"></div>
+    <h1>DeepSeek Harness</h1>
+    <p>正在启动内置 dsh 服务（http://127.0.0.1:3080），请稍候…</p>
+    <span class="badge">首次启动可能需要数秒</span>
+  </body>
+</html>
