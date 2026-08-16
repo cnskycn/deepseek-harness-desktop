@@ -1,10 +1,10 @@
 'use strict'
 
 /**
- * 准备内置运行时：仅把 @deepseek-ai/dsh 安装到 resources/dsh。
+ * 准备内置运行时：安装 @deepseek-ai/dsh 到 resources/dsh。
  *
- * Node.js 不再打包进安装包，而是在安装过程中 / 应用启动时检测，
- * 若缺失则由安装程序或应用引导安装（见 build/installer.nsh 与 electron/main.js）。
+ * Node.js 以 portable 形态打包（resources/node/win-x64/node.exe，不带 npm），
+ * 应用启动时优先使用内置 node；仅当内置 node 缺失时才检测系统 Node.js。
  *
  * 用法：node scripts/setup-runtime.js
  * 可用环境变量：
@@ -38,7 +38,7 @@ function main() {
   fs.mkdirSync(RUNTIME_DIR, { recursive: true })
   const pkg = {
     name: 'dsh-runtime',
-    version: '1.0.0',
+    version: '1.1.0',
     private: true,
     description: 'Bundled runtime for DeepSeek Harness Desktop',
   }

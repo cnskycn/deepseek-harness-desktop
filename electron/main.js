@@ -38,6 +38,15 @@ function runCapture(cmd, args) {
   }
 }
 
+/**
+ * 内置 portable Node.js 路径。打包后位于 resources/node/win-x64/node.exe，
+ * 开发模式位于项目 resources/node/win-x64/node.exe。
+ */
+function bundledNodePath() {
+  const resDir = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..', 'resources')
+  return path.join(resDir, 'node', 'win-x64', 'node.exe')
+}
+
 function findSystemNode() {
   // 1. 依赖 PATH
   const t = runCapture(isWin ? 'where' : 'which', ['node'])
@@ -142,6 +151,15 @@ function tryInstallNodeViaWinget() {
  */
 async function ensureNode() {
   for (;;) {
+    // 1) 优先使用内置 portable Node.js（开箱即用，无需系统安装）
+    const bundled = bundledNodePath()
+    if (bundled && fs.existsSync(bundled)) {
+      const bv = nodeVersion(bundled)
+      const bZstd = nodeHasZstd(bundled)
+      if (bv && versionGte(bv, MIN_NODE_VERSION) && bZstd) return bundled
+    }
+
+    // 2) 回退：检测系统 Node.js
     const found = findSystemNode()
     if (found) {
       const v = nodeVersion(found)

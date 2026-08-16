@@ -29,10 +29,13 @@ function runShell(cmd) {
   }
 }
 
-console.log('=== 第 1 步：准备运行时（Node.js + dsh）===')
+console.log('=== 第 1 步：准备 dsh 运行时 ===')
 run(process.execPath, [path.join(__dirname, 'setup-runtime.js')])
 
-console.log('\n=== 第 2 步：打包 Windows 安装包（electron-builder）===')
+console.log('\n=== 第 2 步：精简 dsh 运行时（删除 PDB/类型/源地图等冗余）===')
+run(process.execPath, [path.join(__dirname, 'prune-runtime.js')])
+
+console.log('\n=== 第 3 步：打包 Windows 安装包（electron-builder）===')
 const builder = path.join(
   ROOT,
   'node_modules',

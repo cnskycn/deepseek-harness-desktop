@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "DeepSeek Harness (dsh) 一键安装桌面版 —— 内置 Node.js 运行时与 Web UI，双击即可使用",
   "author": "DeepSeek Harness Desktop",
   "license": "MIT",
@@ -31,6 +31,10 @@
       {
         "from": "resources/dsh",
         "to": "dsh"
+      },
+      {
+        "from": "resources/node",
+        "to": "node"
       }
     ],
     "asar": true,
