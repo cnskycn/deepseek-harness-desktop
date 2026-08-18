@@ -10,14 +10,22 @@
     "start": "electron .",
     "setup:runtime": "node scripts/setup-runtime.js",
     "build": "node scripts/build.js",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis",
+    "release": "electron-builder --win nsis --publish onTag"
   },
   "devDependencies": {
     "electron": "43.4.0",
     "electron-builder": "26.15.3"
   },
   "build": {
-    "appId": "com.deepseek.harness.desktop",
+  "appId": "com.deepseek.harness.desktop",
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "cnskycn",
+      "repo": "deepseek-harness-desktop"
+    }
+  ],
     "productName": "DeepSeek Harness",
     "directories": {
       "output": "dist",

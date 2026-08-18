@@ -412,7 +412,7 @@ function stopServer() {
   }
 }
 
-/* ---------------- 自动更新（Gitee 发布通道） ---------------- */
+/* ---------------- 自动更新（GitHub / Gitee 发布通道） ---------------- */
 
 function setupAutoUpdater() {
   let cfg
@@ -421,20 +421,32 @@ function setupAutoUpdater() {
   } catch (_) {
     return // 没有配置文件则不启用更新
   }
-  if (!cfg.owner || !cfg.repo || cfg.owner === 'YOUR_GITEE_OWNER') {
-    console.log('[updater] 未配置 Gitee 仓库（owner/repo），跳过自动更新')
+  if (!cfg.owner || !cfg.repo) {
+    console.log('[updater] 未配置更新仓库（owner/repo），跳过自动更新')
     return
   }
+  const provider = (cfg.provider || 'github').toLowerCase()
 
   try {
-    autoUpdater.setFeedURL({
-      provider: 'custom',
-      updateProvider: GiteeProvider,
-      owner: cfg.owner,
-      repo: cfg.repo,
-      channel: cfg.channel || 'latest',
-      token: process.env.GITEE_TOKEN || null,
-    })
+    if (provider === 'gitee') {
+      // Gitee Releases 自定义通道（国内快，但需用 publish-gitee.js 发布）
+      autoUpdater.setFeedURL({
+        provider: 'custom',
+        updateProvider: GiteeProvider,
+        owner: cfg.owner,
+        repo: cfg.repo,
+        channel: cfg.channel || 'latest',
+        token: process.env.GITEE_TOKEN || null,
+      })
+    } else {
+      // GitHub Releases 原生通道（默认）
+      autoUpdater.setFeedURL({
+        provider: 'github',
+        owner: cfg.owner,
+        repo: cfg.repo,
+        token: process.env.GITHUB_TOKEN || null,
+      })
+    }
     autoUpdater.allowPrerelease = !!cfg.allowPrerelease
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true

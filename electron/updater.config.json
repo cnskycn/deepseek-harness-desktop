@@ -1,4 +1,5 @@
 {
+  "provider": "github",
   "owner": "cnskycn",
   "repo": "deepseek-harness-desktop",
   "channel": "latest",
