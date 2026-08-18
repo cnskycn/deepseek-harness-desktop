@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "DeepSeek Harness (dsh) 一键安装桌面版 —— 内置 Node.js 运行时与 Web UI，双击即可使用",
   "author": "DeepSeek Harness Desktop",
   "license": "MIT",
@@ -25,7 +25,23 @@
     },
     "files": [
       "electron/**/*",
-      "!electron/**/*.map"
+      "!electron/**/*.map",
+      "node_modules/argparse/**/*",
+      "node_modules/builder-util-runtime/**/*",
+      "node_modules/debug/**/*",
+      "node_modules/electron-updater/**/*",
+      "node_modules/fs-extra/**/*",
+      "node_modules/graceful-fs/**/*",
+      "node_modules/js-yaml/**/*",
+      "node_modules/jsonfile/**/*",
+      "node_modules/lazy-val/**/*",
+      "node_modules/lodash.escaperegexp/**/*",
+      "node_modules/lodash.isequal/**/*",
+      "node_modules/ms/**/*",
+      "node_modules/sax/**/*",
+      "node_modules/semver/**/*",
+      "node_modules/tiny-typed-emitter/**/*",
+      "node_modules/universalify/**/*"
     ],
     "extraResources": [
       {
@@ -51,9 +67,9 @@
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": false,
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "DeepSeek Harness",
@@ -61,5 +77,8 @@
       "deleteAppDataOnUninstall": false,
       "include": "build/installer.nsh"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

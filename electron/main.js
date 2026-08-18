@@ -5,6 +5,8 @@ const { spawn, spawnSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 const http = require('http')
+const { autoUpdater } = require('electron-updater')
+const GiteeProvider = require('./gitee-provider')
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 3080
@@ -410,6 +412,72 @@ function stopServer() {
   }
 }
 
+/* ---------------- 自动更新（Gitee 发布通道） ---------------- */
+
+function setupAutoUpdater() {
+  let cfg
+  try {
+    cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'updater.config.json'), 'utf8'))
+  } catch (_) {
+    return // 没有配置文件则不启用更新
+  }
+  if (!cfg.owner || !cfg.repo || cfg.owner === 'YOUR_GITEE_OWNER') {
+    console.log('[updater] 未配置 Gitee 仓库（owner/repo），跳过自动更新')
+    return
+  }
+
+  try {
+    autoUpdater.setFeedURL({
+      provider: 'custom',
+      updateProvider: GiteeProvider,
+      owner: cfg.owner,
+      repo: cfg.repo,
+      channel: cfg.channel || 'latest',
+      token: process.env.GITEE_TOKEN || null,
+    })
+    autoUpdater.allowPrerelease = !!cfg.allowPrerelease
+    autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = true
+
+    autoUpdater.on('update-available', (info) => {
+      console.log(`[updater] 发现新版本 ${info.version}`)
+      sendLog(`\n[自动更新] 发现新版本 ${info.version}，开始下载…\n`)
+    })
+    autoUpdater.on('update-not-available', (info) => {
+      console.log(`[updater] 当前已是最新（${info.version}）`)
+    })
+    autoUpdater.on('download-progress', (p) => {
+      sendLog(`\r[自动更新] 下载进度 ${Math.floor(p.percent)}%`)
+    })
+    autoUpdater.on('update-downloaded', (info) => {
+      console.log(`[updater] 新版本 ${info.version} 已下载，等待安装`)
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        dialog
+          .showMessageBox(mainWindow, {
+            type: 'info',
+            buttons: ['立即重启安装', '稍后'],
+            defaultId: 0,
+            cancelId: 1,
+            title: '发现新版本',
+            message: `DeepSeek Harness ${info.version} 已下载完成。`,
+            detail: '点击「立即重启安装」将重启应用并完成升级。',
+          })
+          .then((r) => {
+            if (r.response === 0) autoUpdater.quitAndInstall()
+          })
+      }
+    })
+    autoUpdater.on('error', (err) => {
+      console.error('[updater] 更新出错：', err && (err.stack || err.message))
+      sendLog(`\n[自动更新] 检查更新失败：${err && err.message}\n`)
+    })
+
+    autoUpdater.checkForUpdates().catch(() => {})
+  } catch (e) {
+    console.error('[updater] 初始化失败：', e && (e.stack || e.message))
+  }
+}
+
 /* ---------------- 应用生命周期 ---------------- */
 
 const gotLock = app.requestSingleInstanceLock()
@@ -423,7 +491,10 @@ if (!gotLock) {
     }
   })
 
-  app.whenReady().then(boot)
+  app.whenReady().then(() => {
+    setupAutoUpdater()
+    boot()
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) boot()
