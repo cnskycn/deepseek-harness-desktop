@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, shell, dialog } = require('electron')
+const { app, BrowserWindow, shell, dialog, Tray, Menu, nativeImage } = require('electron')
 const { spawn, spawnSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
@@ -18,8 +18,19 @@ let mainWindow = null
 let serverUrl = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`
 let serverLogs = ''
 let nodeCommand = 'node'
+let tray = null
+let checkingUpdate = false
 
 const isWin = process.platform === 'win32'
+
+function trayIconPath() {
+  const base = __dirname
+  const candidates = [
+    path.join(base, 'tray-icon.png'),
+    path.join(base, 'tray-icon@2x.png'),
+  ]
+  return candidates.find((p) => fs.existsSync(p)) || null
+}
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms))
@@ -490,6 +501,103 @@ function setupAutoUpdater() {
   }
 }
 
+/* ---------------- 托盘与交互式更新检查 ---------------- */
+
+function showMainWindow() {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  }
+}
+
+function appVersion() {
+  try {
+    return app.getVersion()
+  } catch (_) {
+    return 'unknown'
+  }
+}
+
+/**
+ * 交互式「检查更新」：从托盘触发。有可更新版本时触发自动下载（下载完成后
+ * 已有 update-downloaded 弹窗引导重启安装）；否则弹窗提示当前已是最新。
+ */
+async function checkForUpdatesInteractive() {
+  if (checkingUpdate) return
+  checkingUpdate = true
+  try {
+    const r = await autoUpdater.checkForUpdates()
+    if (!r || !r.updateInfo) {
+      dialog.showMessageBox({
+        type: 'info',
+        title: '检查更新',
+        message: '当前已是最新版本',
+        detail: `DeepSeek Harness ${appVersion()}`,
+      })
+    }
+    // 有 updateInfo 说明已发现新版，update-available 会触发下载并在完成后弹窗。
+  } catch (e) {
+    dialog.showMessageBox({
+      type: 'warning',
+      title: '检查更新失败',
+      message: '无法连接到更新服务器',
+      detail: (e && (e.message || e.stack)) || String(e),
+    })
+  } finally {
+    checkingUpdate = false
+  }
+}
+
+function createTray() {
+  const iconPath = trayIconPath()
+  if (!iconPath) {
+    console.log('[tray] 未找到托盘图标，跳过创建')
+    return
+  }
+  let image = nativeImage.createFromPath(iconPath)
+  if (image.isEmpty()) {
+    // 回退：从 base64 内嵌图标（16x16，与 gen-tray-icon.js 相同样式）
+    image = nativeImage.createFromDataURL(
+      'data:image/png;base64,' +
+        'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAEklEQVR4nGP8z8Dwn4GBgYG'
+    )
+  }
+  tray = new Tray(image)
+  tray.setToolTip('DeepSeek Harness')
+
+  const menu = Menu.buildFromTemplate([
+    { label: '显示主界面', click: showMainWindow },
+    { type: 'separator' },
+    { label: '检查更新…', click: () => checkForUpdatesInteractive() },
+    { label: '关于 / 版本', click: () => showAbout() },
+    { type: 'separator' },
+    { label: '退出', click: () => app.quit() },
+  ])
+  tray.setContextMenu(menu)
+  tray.on('click', showMainWindow)
+}
+
+function showAbout() {
+  const u = updaterInfoText()
+  dialog.showMessageBox({
+    type: 'info',
+    title: '关于 DeepSeek Harness',
+    message: `DeepSeek Harness ${appVersion()}`,
+    detail: u ? u + '\n\n基于 Electron 封装 dsh 运行时，内置 Node.js，双击即可使用。' : '基于 Electron 封装 dsh 运行时，内置 Node.js，双击即可使用。',
+  })
+}
+
+function updaterInfoText() {
+  let cfg
+  try {
+    cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'updater.config.json'), 'utf8'))
+  } catch (_) {
+    return null
+  }
+  return `更新通道：${(cfg.provider || 'github').toUpperCase()} · ${cfg.owner}/${cfg.repo}`
+}
+
 /* ---------------- 应用生命周期 ---------------- */
 
 const gotLock = app.requestSingleInstanceLock()
@@ -505,6 +613,7 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     setupAutoUpdater()
+    createTray()
     boot()
   })
 

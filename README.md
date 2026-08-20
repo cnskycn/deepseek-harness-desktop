@@ -5,7 +5,7 @@
 把 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 的 Web UI 封装为 **Windows 桌面应用**，一键安装、双击即用。
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078d6)
-![dsh](https://img.shields.io/badge/dsh-0.1.0--rc.7-4b6bff)
+![dsh](https://img.shields.io/badge/dsh-0.1.0--rc.8-4b6bff)
 ![Node](https://img.shields.io/badge/node-%3E%3D22.19-339933)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -18,12 +18,13 @@
 - 📦 **内置 Node.js 运行时**：安装包内置 portable Node.js（不含 npm），开箱即用，无需系统安装 Node，无 UAC
 - 🛡️ **干净的服务管理**：每次启动全新 dsh 实例，退出应用自动回收进程，杜绝残留实例冲突
 - 🌐 **内置完整 dsh**：安装包包含 `@deepseek-ai/dsh` 全部依赖，无需自行安装 Harness
+- 🔔 **托盘菜单**：系统托盘右键可「检查更新」「关于 / 版本」「显示主界面」「退出」
 
 ## 📦 使用
 
 1. 从 [Releases](https://github.com/cnskycn/deepseek-harness-desktop/releases) 下载最新安装包：
 
-   [![Download](https://img.shields.io/badge/download-DeepSeek%20Harness%20v1.2.0-blue?style=for-the-badge&logo=windows)](https://github.com/cnskycn/deepseek-harness-desktop/releases/download/v1.2.0/DeepSeek.Harness-Setup-1.2.0.exe)
+   [![Download](https://img.shields.io/badge/download-DeepSeek%20Harness%20v1.3.0-blue?style=for-the-badge&logo=windows)](https://github.com/cnskycn/deepseek-harness-desktop/releases/download/v1.3.0/DeepSeek.Harness-Setup-1.3.0.exe)
 
 2. 运行安装包（安装后自动创建桌面/开始菜单快捷方式）
 3. 打开「DeepSeek Harness」

@@ -8,7 +8,9 @@
  *
  * 用法：node scripts/setup-runtime.js
  * 可用环境变量：
- *   DSH_VERSION  指定 @deepseek-ai/dsh 版本（默认 latest）
+ *   DSH_VERSION            指定 @deepseek-ai/dsh 版本（默认 latest）
+ *   DSH_NPM_REGISTRY       指定 npm registry 镜像（如 npmmirror，默认 npm 官方源）
+ *   DSH_NPM_LEGACY_PEER    置 1 时附加 --legacy-peer-deps（跳过 peer 校验，加速解析）
  *
  * 需要构建机已安装 Node.js + npm（仅用于下载 dsh 依赖，与最终安装包无关）。
  */
@@ -44,13 +46,17 @@ function main() {
   }
   fs.writeFileSync(path.join(RUNTIME_DIR, 'package.json'), JSON.stringify(pkg, null, 2) + '\n')
 
+  const registry = process.env.DSH_NPM_REGISTRY
+  const legacyPeer = process.env.DSH_NPM_LEGACY_PEER === '1'
   console.log('正在安装 ' + DSH_PKG + '@' + DSH_VERSION + ' …（可能需要几分钟）')
   runShell(
     'npm install ' +
       DSH_PKG +
       '@' +
       DSH_VERSION +
-      ' --no-audit --no-fund --omit=dev --ignore-engines',
+      ' --no-audit --no-fund --omit=dev --ignore-engines' +
+      (legacyPeer ? ' --legacy-peer-deps' : '') +
+      (registry ? ' --registry=' + registry : ''),
     RUNTIME_DIR
   )
 
