@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, shell, dialog, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, shell, dialog, Tray, Menu, nativeImage, ipcMain } = require('electron')
 const { spawn, spawnSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
@@ -16,18 +16,24 @@ const MIN_NODE_VERSION = '22.19.0'
 let serverProc = null
 let mainWindow = null
 let serverUrl = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`
+// 新版 dsh（0.1.2+）的 web 地址带一次性 token，必须等它输出后再连接，
+// 否则用无 token 的地址访问会被拒绝。
+let serverUrlResolved = false
 let serverLogs = ''
 let nodeCommand = 'node'
 let tray = null
 let checkingUpdate = false
+/** 用户手动检查更新时的结果呈现方式：'dialog' | 'window' | null（null = 启动时的静默自动检查） */
+let manualCheckRef = null
+let manualSender = null
 
 const isWin = process.platform === 'win32'
 
 function trayIconPath() {
-  const base = __dirname
   const candidates = [
-    path.join(base, 'tray-icon.png'),
-    path.join(base, 'tray-icon@2x.png'),
+    path.join(__dirname, '..', 'build', 'icon.ico'),
+    path.join(__dirname, 'tray-icon.png'),
+    path.join(__dirname, 'tray-icon@2x.png'),
   ]
   return candidates.find((p) => fs.existsSync(p)) || null
 }
@@ -250,10 +256,21 @@ function checkHttp(url) {
   })
 }
 
-async function waitForServer(url, timeoutMs = STARTUP_TIMEOUT_MS) {
+/**
+ * 等待 dsh 启动完成。
+ * 新版 dsh 会输出带一次性 token 的地址，必须等解析到该地址后再判定就绪，
+ * 否则 loadURL 会拿到无 token 的地址而被拒绝（401）。
+ * 若 dsh 长时间不输出地址（老版本行为），则回退为直接探测默认地址。
+ */
+async function waitForServer(timeoutMs = STARTUP_TIMEOUT_MS) {
   const start = Date.now()
+  const graceMs = 15000
   while (Date.now() - start < timeoutMs) {
-    if (await checkHttp(url)) return true
+    if (serverUrlResolved) {
+      if (await checkHttp(serverUrl)) return true
+    } else if (Date.now() - start > graceMs) {
+      if (await checkHttp(serverUrl)) return true
+    }
     await sleep(500)
   }
   return false
@@ -275,7 +292,7 @@ function startServer() {
   serverLogs = ''
   const cwd = workspaceDir()
 
-  serverProc = spawn(nodeCommand, [dshBin, 'web'], {
+  serverProc = spawn(nodeCommand, [dshBin, 'web', '--no-open'], {
     cwd,
     env: { ...process.env },
     windowsHide: true,
@@ -289,6 +306,7 @@ function startServer() {
     const m = s.match(/https?:\/\/[^\s"'<>]+/)
     if (m) {
       serverUrl = m[0].replace(/\/+$/, '')
+      serverUrlResolved = true
     }
   })
 
@@ -338,6 +356,11 @@ function createWindow() {
     shell.openExternal(url)
     return { action: 'deny' }
   })
+
+  // 在主界面（dsh web）注入"关于"入口：集成到顶栏 "Session log" 按钮左侧，
+  // 并在右上角保留"？"按钮作为兜底
+  mainWindow.webContents.on('did-finish-load', injectDesktopButton)
+  mainWindow.webContents.on('did-navigate-in-page', injectDesktopButton)
 
   mainWindow.on('closed', () => {
     mainWindow = null
@@ -401,7 +424,7 @@ async function boot() {
     return
   }
 
-  const ready = await waitForServer(serverUrl)
+  const ready = await waitForServer()
 
   if (ready && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.loadURL(serverUrl)
@@ -465,15 +488,32 @@ function setupAutoUpdater() {
     autoUpdater.on('update-available', (info) => {
       console.log(`[updater] 发现新版本 ${info.version}`)
       sendLog(`\n[自动更新] 发现新版本 ${info.version}，开始下载…\n`)
+      sendUpdateStatus({ type: 'available', text: `发现新版本 ${info.version}，开始下载…` })
     })
     autoUpdater.on('update-not-available', (info) => {
-      console.log(`[updater] 当前已是最新（${info.version}）`)
+      const ver = (info && info.version) || appVersion()
+      console.log(`[updater] 当前已是最新（${ver}）`)
+      // 用户手动触发时必须给出明确反馈；启动时的自动检查保持静默，不打扰用户。
+      if (manualCheckRef === 'dialog') {
+        dialog.showMessageBox({
+          type: 'info',
+          title: '检查更新',
+          message: '当前已是最新版本',
+          detail: `DeepSeek Harness ${appVersion()}\n远端最新版本：${ver}`,
+        })
+      } else if (manualCheckRef === 'window') {
+        sendUpdateStatus({ type: 'latest', version: ver, text: `当前已是最新版本（${ver}）` })
+      }
+      manualCheckRef = null
+      manualSender = null
     })
     autoUpdater.on('download-progress', (p) => {
       sendLog(`\r[自动更新] 下载进度 ${Math.floor(p.percent)}%`)
+      sendUpdateStatus({ type: 'progress', percent: Math.floor(p.percent), text: `下载中 ${Math.floor(p.percent)}%` })
     })
     autoUpdater.on('update-downloaded', (info) => {
       console.log(`[updater] 新版本 ${info.version} 已下载，等待安装`)
+      sendUpdateStatus({ type: 'downloaded', version: info.version, text: `新版本 ${info.version} 已下载，可重启安装` })
       if (mainWindow && !mainWindow.isDestroyed()) {
         dialog
           .showMessageBox(mainWindow, {
@@ -493,6 +533,11 @@ function setupAutoUpdater() {
     autoUpdater.on('error', (err) => {
       console.error('[updater] 更新出错：', err && (err.stack || err.message))
       sendLog(`\n[自动更新] 检查更新失败：${err && err.message}\n`)
+      sendUpdateStatus({ type: 'error', text: `更新出错：${err && err.message}` })
+      if (manualCheckRef) {
+        manualCheckRef = null
+        manualSender = null
+      }
     })
 
     autoUpdater.checkForUpdates().catch(() => {})
@@ -570,7 +615,7 @@ function createTray() {
     { label: '显示主界面', click: showMainWindow },
     { type: 'separator' },
     { label: '检查更新…', click: () => checkForUpdatesInteractive() },
-    { label: '关于 / 版本', click: () => showAbout() },
+    { label: '关于 / 版本', click: () => openAboutWindow() },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ])
@@ -578,14 +623,182 @@ function createTray() {
   tray.on('click', showMainWindow)
 }
 
-function showAbout() {
-  const u = updaterInfoText()
-  dialog.showMessageBox({
-    type: 'info',
-    title: '关于 DeepSeek Harness',
-    message: `DeepSeek Harness ${appVersion()}`,
-    detail: u ? u + '\n\n基于 Electron 封装 dsh 运行时，内置 Node.js，双击即可使用。' : '基于 Electron 封装 dsh 运行时，内置 Node.js，双击即可使用。',
+/* ---------------- 关于 / 设置窗口 ---------------- */
+
+let aboutWindow = null
+
+function dshVersion() {
+  try {
+    const base = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..', 'resources')
+    const p = path.join(base, 'dsh', 'runtime', 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
+    return JSON.parse(fs.readFileSync(p, 'utf8')).version
+  } catch (_) {
+    return 'unknown'
+  }
+}
+
+function buildAppInfo() {
+  let cfg = {}
+  try {
+    cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'updater.config.json'), 'utf8'))
+  } catch (_) {}
+  const provider = (cfg.provider || 'github').toLowerCase()
+  const updateUrl =
+    provider === 'gitee'
+      ? `https://gitee.com/${cfg.owner || ''}/${cfg.repo || ''}/releases`
+      : `https://github.com/${cfg.owner || ''}/${cfg.repo || ''}/releases`
+  return {
+    appVersion: appVersion(),
+    dshVersion: dshVersion(),
+    provider: (cfg.provider || 'github').toUpperCase(),
+    owner: cfg.owner || '',
+    repo: cfg.repo || '',
+    channel: cfg.channel || 'latest',
+    updateUrl,
+  }
+}
+
+function openAboutWindow() {
+  if (aboutWindow && !aboutWindow.isDestroyed()) {
+    aboutWindow.focus()
+    return
+  }
+  aboutWindow = new BrowserWindow({
+    width: 460,
+    height: 560,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    backgroundColor: '#0b0f1a',
+    title: '关于 / 设置',
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
   })
+  aboutWindow.setMenuBarVisibility(false)
+  aboutWindow.loadFile(path.join(__dirname, 'about.html'))
+  aboutWindow.on('closed', () => {
+    aboutWindow = null
+  })
+}
+
+/** 把更新状态转发给关于窗口（若已打开） */
+function sendUpdateStatus(payload) {
+  if (aboutWindow && !aboutWindow.isDestroyed()) {
+    aboutWindow.webContents.send('app:update-status', payload)
+  }
+}
+
+/**
+ * 通用更新检查。ref 指定结果呈现方式：
+ *  - 'dialog'：弹窗（托盘「检查更新…」触发）
+ *  - 'window'：通过 IPC 把状态发给关于窗口（关于页按钮触发）
+ */
+async function runUpdateCheck(ref, sender) {
+  if (checkingUpdate) {
+    if (ref === 'window' && sender && !sender.isDestroyed()) {
+      sender.send('app:update-status', { type: 'checking', text: '正在检查更新，请稍候…' })
+    }
+    return
+  }
+  checkingUpdate = true
+  manualCheckRef = ref
+  manualSender = sender
+  if (ref === 'window' && sender && !sender.isDestroyed()) {
+    sender.send('app:update-status', { type: 'checking', text: '正在检查更新…' })
+  }
+  try {
+    // 注意：不能用 `!r.updateInfo` 判断"已是最新" —— electron-updater 无论有无
+    // 更新都会返回 updateInfo（远端 latest.yml 内容）。结果统一由
+    // update-available / update-not-available 事件驱动呈现。
+    await autoUpdater.checkForUpdates()
+  } catch (e) {
+    const msg = (e && (e.message || e.stack)) || String(e)
+    if (ref === 'dialog') {
+      dialog.showMessageBox({
+        type: 'warning',
+        title: '检查更新失败',
+        message: '无法连接到更新服务器',
+        detail: msg,
+      })
+    } else if (sender && !sender.isDestroyed()) {
+      sender.send('app:update-status', { type: 'error', text: '检查更新失败：' + msg })
+    }
+    manualCheckRef = null
+    manualSender = null
+  } finally {
+    checkingUpdate = false
+  }
+}
+
+/* ---------------- 桌面端 IPC ---------------- */
+
+ipcMain.handle('app:get-info', () => buildAppInfo())
+
+ipcMain.on('app:open-about', () => openAboutWindow())
+
+ipcMain.on('app:check-updates', (event) => runUpdateCheck('window', event.sender))
+
+ipcMain.on('app:quit-install', () => {
+  try {
+    autoUpdater.quitAndInstall()
+  } catch (_) {}
+})
+
+ipcMain.on('app:open-external', (event, url) => {
+  if (url && /^https?:\/\//i.test(url)) shell.openExternal(url)
+})
+
+function injectDesktopButton() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents
+    .executeJavaScript(
+      `(function(){
+        // 1) 右上角"？"按钮（兜底入口，避免 dsh web 改版导致找不到入口）
+        if (!document.getElementById('__dsh_desktop_help')) {
+          var h = document.createElement('div');
+          h.id = '__dsh_desktop_help';
+          h.title = '关于 / 设置';
+          h.textContent = '?';
+          h.style.cssText = 'position:fixed;top:7px;right:150px;z-index:2147483647;width:30px;height:30px;border-radius:6px;background:rgba(255,255,255,0.08);color:#e6ebf5;font-size:16px;font-weight:600;line-height:30px;text-align:center;cursor:pointer;user-select:none;-webkit-app-region:no-drag;transition:background .15s;';
+          h.addEventListener('mouseenter', function(){ h.style.background='rgba(255,255,255,0.18)'; });
+          h.addEventListener('mouseleave', function(){ h.style.background='rgba(255,255,255,0.08)'; });
+          h.addEventListener('click', function(){ try { window.dshDesktop.openAbout(); } catch(e){} });
+          (document.body || document.documentElement).appendChild(h);
+        }
+        // 2) 在 "Session log" 按钮左侧注入"关于"按钮（集成式入口）
+        if (window.__dshAboutInjecting) return;
+        window.__dshAboutInjecting = true;
+        var tries = 0;
+        var iv = setInterval(function(){
+          tries++;
+          if (tries > 200) { clearInterval(iv); return; }
+          var nodes = document.querySelectorAll('button,a,[role="button"],div');
+          var tgt = null;
+          for (var i = 0; i < nodes.length; i++) {
+            var txt = (nodes[i].textContent || '').trim().toLowerCase();
+            if (txt.indexOf('session log') !== -1 && nodes[i].offsetParent !== null) { tgt = nodes[i]; break; }
+          }
+          if (!tgt) return;
+          var existing = document.getElementById('__dsh_about_btn');
+          if (!existing && tgt.parentNode) {
+            var ab = document.createElement('button');
+            ab.id = '__dsh_about_btn';
+            ab.type = 'button';
+            ab.textContent = '关于';
+            ab.style.cssText = 'display:inline-flex;align-items:center;height:30px;padding:0 14px;margin-right:8px;border:1px solid rgba(255,255,255,0.16);border-radius:6px;background:rgba(255,255,255,0.06);color:#e6ebf5;font-size:13px;cursor:pointer;font-family:inherit;vertical-align:middle;';
+            ab.addEventListener('click', function(e){ e.stopPropagation(); e.preventDefault(); try { window.dshDesktop.openAbout(); } catch(_){} });
+            tgt.parentNode.insertBefore(ab, tgt);
+          }
+        }, 500);
+      })();`
+    )
+    .catch(() => {})
 }
 
 function updaterInfoText() {

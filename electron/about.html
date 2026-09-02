@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+    <title>关于 / 设置 · DeepSeek Harness</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        min-height: 100vh;
+        padding: 26px 26px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        background: radial-gradient(900px 600px at 50% -20%, #14203a 0%, #0b0f1a 60%, #080b12 100%);
+        font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+        color: #e6ebf5;
+      }
+      .head { display: flex; align-items: center; gap: 14px; }
+      .logo {
+        width: 46px; height: 46px; border-radius: 12px; flex: 0 0 auto;
+        background: linear-gradient(135deg, #5b8cff, #8a5bff);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 22px; font-weight: 700; color: #fff;
+      }
+      .title { font-size: 19px; font-weight: 600; letter-spacing: 0.3px; }
+      .subtitle { font-size: 12px; color: #8b96ad; margin-top: 2px; }
+      .card {
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 12px;
+        padding: 16px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+      .row .k { color: #8b96ad; }
+      .row .v { color: #e6ebf5; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+      button {
+        border: 0; border-radius: 9px; padding: 10px 18px;
+        background: #5b8cff; color: #fff; font-size: 14px; cursor: pointer;
+        transition: background .15s;
+      }
+      button:hover { background: #6d99ff; }
+      button.ghost { background: rgba(255,255,255,0.08); color: #cdd6e6; }
+      button.ghost:hover { background: rgba(255,255,255,0.14); }
+      button:disabled { opacity: .5; cursor: default; }
+      #installBtn { display: none; background: #2ea043; }
+      #installBtn:hover { background: #36b04f; }
+      #progressWrap { display: none; }
+      .bar-bg { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; }
+      .bar { height: 100%; width: 0%; background: linear-gradient(90deg,#5b8cff,#8a5bff); transition: width .25s; }
+      /* 不确定进度：检查阶段无法预知耗时，用来回滑动的条表示"正在工作" */
+      .bar.indeterminate { width: 32%; animation: slide 1.15s ease-in-out infinite; transition: none; }
+      @keyframes slide {
+        0%   { margin-left: -32%; }
+        100% { margin-left: 100%; }
+      }
+      .status { font-size: 13px; min-height: 18px; color: #8b96ad; }
+      .status.info { color: #9db9ff; }
+      .status.ok { color: #56d364; }
+      .status.err { color: #ff7b72; }
+      .link { font-size: 12px; color: #6b7486; word-break: break-all; }
+      .link a { color: #9db9ff; text-decoration: none; }
+      .link a:hover { text-decoration: underline; }
+      .foot { margin-top: auto; font-size: 11px; color: #5a6375; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <div class="head">
+      <div class="logo">D</div>
+      <div>
+        <div class="title">DeepSeek Harness</div>
+        <div class="subtitle">桌面端 · 内置 dsh 运行时</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row"><span class="k">应用版本</span><span class="v" id="appVersion">…</span></div>
+      <div class="row"><span class="k">内置 dsh</span><span class="v" id="dshVersion">…</span></div>
+      <div class="row"><span class="k">更新通道</span><span class="v" id="channel">…</span></div>
+    </div>
+
+    <div class="card">
+      <div class="actions">
+        <button id="checkBtn">检查更新</button>
+        <button id="installBtn">立即重启安装</button>
+        <button id="closeBtn" class="ghost">关闭</button>
+      </div>
+      <div id="progressWrap">
+        <div class="bar-bg"><div class="bar" id="bar"></div></div>
+      </div>
+      <div class="status" id="status">点击「检查更新」可手动检查新版本。</div>
+    </div>
+
+    <div class="link">发布页：<a id="repoLink" href="#">#</a></div>
+
+    <div class="foot">基于 Electron 封装 dsh · 双击即用，无需额外安装</div>
+
+    <script>
+      const $ = (id) => document.getElementById(id)
+
+      function setStatus(text, kind) {
+        const el = $('status')
+        el.textContent = text
+        el.className = 'status ' + (kind || '')
+      }
+      /** p 为 null/undefined 时显示不确定进度（来回滑动） */
+      function setProgress(p) {
+        const bar = $('bar')
+        $('progressWrap').style.display = 'block'
+        if (p === null || p === undefined) {
+          bar.classList.add('indeterminate')
+          bar.style.width = ''
+        } else {
+          bar.classList.remove('indeterminate')
+          bar.style.width = p + '%'
+        }
+      }
+      function hideProgress() {
+        $('progressWrap').style.display = 'none'
+        $('bar').classList.remove('indeterminate')
+      }
+      function setCheckingState(on) {
+        $('checkBtn').disabled = !!on
+      }
+
+      async function init() {
+        try {
+          const info = await window.dshDesktop.getAppInfo()
+          $('appVersion').textContent = info.appVersion
+          $('dshVersion').textContent = info.dshVersion
+          $('channel').textContent = info.provider + ' · ' + info.owner + '/' + info.repo
+          const link = $('repoLink')
+          link.href = info.updateUrl
+          link.textContent = info.updateUrl
+        } catch (e) {
+          setStatus('无法读取版本信息：' + e.message, 'err')
+        }
+      }
+
+      if (window.dshDesktop && window.dshDesktop.onUpdateStatus) {
+        window.dshDesktop.onUpdateStatus((p) => {
+          if (p.type === 'checking') {
+            setStatus(p.text || '正在检查更新…', 'info')
+            setProgress(null)
+            setCheckingState(true)
+          } else if (p.type === 'available') {
+            setStatus(p.text, 'info')
+            setProgress(0)
+          } else if (p.type === 'progress') {
+            setStatus(p.text, 'info')
+            setProgress(p.percent)
+          } else if (p.type === 'downloaded') {
+            setStatus('✓ ' + p.text, 'ok')
+            hideProgress()
+            setCheckingState(false)
+            $('installBtn').style.display = 'inline-block'
+          } else if (p.type === 'latest') {
+            // 无新版本也必须明确告知用户，而不是停在"正在检查…"
+            setStatus('✓ ' + (p.text || '当前已是最新版本'), 'ok')
+            hideProgress()
+            setCheckingState(false)
+          } else if (p.type === 'error') {
+            setStatus('✕ ' + p.text, 'err')
+            hideProgress()
+            setCheckingState(false)
+          } else if (p.type === 'info') {
+            setStatus(p.text, 'info')
+          }
+        })
+      }
+
+      $('checkBtn').onclick = () => {
+        setStatus('正在检查更新…', 'info')
+        setProgress(null)
+        setCheckingState(true)
+        $('installBtn').style.display = 'none'
+        if (window.dshDesktop) window.dshDesktop.checkForUpdates()
+      }
+      $('installBtn').onclick = () => { if (window.dshDesktop) window.dshDesktop.quitAndInstall() }
+      $('closeBtn').onclick = () => window.close()
+      $('repoLink').onclick = (e) => {
+        e.preventDefault()
+        if (window.dshDesktop) window.dshDesktop.openExternal($('repoLink').href)
+      }
+
+      init()
+    </script>
+  </body>
+</html>
