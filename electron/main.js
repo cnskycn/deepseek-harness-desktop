@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, shell, dialog, Tray, Menu, nativeImage, ipcMain } = require('electron')
+const { app, BrowserWindow, shell, dialog, Tray, Menu, nativeImage, ipcMain, clipboard } = require('electron')
 const { spawn, spawnSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
@@ -31,6 +31,9 @@ const isWin = process.platform === 'win32'
 
 function trayIconPath() {
   const candidates = [
+    // 打包后 electron/icon.ico 随 app.asar 携带（files 含 electron/**/*），必须放第一
+    path.join(__dirname, 'icon.ico'),
+    // 开发模式回退到项目 build 目录
     path.join(__dirname, '..', 'build', 'icon.ico'),
     path.join(__dirname, 'tray-icon.png'),
     path.join(__dirname, 'tray-icon@2x.png'),
@@ -556,6 +559,37 @@ function showMainWindow() {
   }
 }
 
+/** 用带鉴权 token 的完整地址在默认浏览器打开 Web UI */
+function openWebInBrowser() {
+  if (!serverUrlResolved || !serverUrl) {
+    dialog.showMessageBox({
+      type: 'info',
+      title: 'Web UI',
+      message: 'dsh 服务尚未就绪',
+      detail: '请等待应用完成启动（加载页消失）后再试。',
+    })
+    return
+  }
+  shell.openExternal(serverUrl)
+}
+
+/** 复制带鉴权 token 的 Web 访问地址到剪贴板 */
+function copyWebUrl() {
+  if (!serverUrlResolved || !serverUrl) {
+    dialog.showMessageBox({
+      type: 'info',
+      title: 'Web UI',
+      message: 'dsh 服务尚未就绪',
+      detail: '请等待应用完成启动（加载页消失）后再试。',
+    })
+    return
+  }
+  clipboard.writeText(serverUrl)
+  if (tray && tray.displayBalloon) {
+    tray.displayBalloon({ title: '已复制', content: 'Web 访问地址已复制到剪贴板，可在任意浏览器打开。' })
+  }
+}
+
 function appVersion() {
   try {
     return app.getVersion()
@@ -613,9 +647,11 @@ function createTray() {
 
   const menu = Menu.buildFromTemplate([
     { label: '显示主界面', click: showMainWindow },
+    { label: '在浏览器打开 Web UI', click: () => openWebInBrowser() },
+    { label: '复制 Web 访问地址', click: () => copyWebUrl() },
     { type: 'separator' },
-    { label: '检查更新…', click: () => checkForUpdatesInteractive() },
-    { label: '关于 / 版本', click: () => openAboutWindow() },
+    { label: '检查更新…', click: () => runUpdateCheck('dialog') },
+    { label: '关于', click: () => openAboutWindow() },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ])
