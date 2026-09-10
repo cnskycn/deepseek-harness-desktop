@@ -35,7 +35,8 @@
     "setup:runtime": "node scripts/setup-runtime.js",
     "build": "node scripts/build.js",
     "dist": "electron-builder --win nsis",
-    "release": "electron-builder --win nsis --publish onTag"
+    "release": "electron-builder --win nsis --publish onTag",
+    "publish:cnb": "node scripts/publish-cnb.js --repo cnskycn/deepseek-harness-desktop --tag latest"
   },
   "devDependencies": {
     "electron": "43.4.0",
