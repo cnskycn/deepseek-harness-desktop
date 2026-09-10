@@ -45,6 +45,26 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+/**
+ * 启动流程日志：同时输出到控制台并追加写盘（userData/logs/boot.log），
+ * 便于在用户机器上排查"卡在启动页 / 黑屏"这类无法复现的问题。
+ */
+let bootLogPath = null
+function log(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}`
+  try {
+    console.log(line)
+  } catch (_) {}
+  try {
+    if (!bootLogPath) {
+      const dir = path.join(app.getPath('userData'), 'logs')
+      fs.mkdirSync(dir, { recursive: true })
+      bootLogPath = path.join(dir, 'boot.log')
+    }
+    fs.appendFileSync(bootLogPath, line + '\n')
+  } catch (_) {}
+}
+
 /* ---------------- Node.js 检测 ---------------- */
 
 function runCapture(cmd, args) {
@@ -245,14 +265,21 @@ function workspaceDir() {
   return dir
 }
 
-function checkHttp(url) {
+/**
+ * 探测 URL 是否有响应。
+ * @param {boolean} requireOk 为 true 时只把 2xx/3xx 视为成功。
+ *   这很重要：新版 dsh 对未携带 token 的请求返回 **401**（服务在跑但鉴权拒绝），
+ *   若把 401 当成"就绪"，loadURL 会加载鉴权失败页，表现为**窗口黑屏**。
+ */
+function checkHttp(url, requireOk = false) {
   return new Promise((resolve) => {
     const req = http.get(url, (res) => {
       res.resume()
-      resolve(true)
+      if (requireOk) resolve(res.statusCode >= 200 && res.statusCode < 400)
+      else resolve(true)
     })
     req.on('error', () => resolve(false))
-    req.setTimeout(2000, () => {
+    req.setTimeout(3000, () => {
       req.destroy()
       resolve(false)
     })
@@ -261,18 +288,21 @@ function checkHttp(url) {
 
 /**
  * 等待 dsh 启动完成。
- * 新版 dsh 会输出带一次性 token 的地址，必须等解析到该地址后再判定就绪，
- * 否则 loadURL 会拿到无 token 的地址而被拒绝（401）。
- * 若 dsh 长时间不输出地址（老版本行为），则回退为直接探测默认地址。
+ *
+ * 新版 dsh 启动时会打印带一次性 token 的完整地址（`.../?token=xxx`），
+ * 必须等它出现后再连接，否则只能拿到 401。老版本 dsh 不打印地址，
+ * 因此超过 fallbackToDefaultMs 后允许退化到"探测默认地址"，但**仍要求 2xx/3xx**，
+ * 避免把 401 误判为就绪（这正是此前"首页黑屏 / 首次启动失败"的根因）。
  */
 async function waitForServer(timeoutMs = STARTUP_TIMEOUT_MS) {
   const start = Date.now()
-  const graceMs = 15000
+  const fallbackToDefaultMs = 90000
   while (Date.now() - start < timeoutMs) {
     if (serverUrlResolved) {
-      if (await checkHttp(serverUrl)) return true
-    } else if (Date.now() - start > graceMs) {
-      if (await checkHttp(serverUrl)) return true
+      if (await checkHttp(serverUrl, true)) return true
+    } else if (Date.now() - start > fallbackToDefaultMs) {
+      log(`[boot] ${fallbackToDefaultMs / 1000}s 内未收到 dsh 输出的地址，退化探测默认地址`)
+      if (await checkHttp(serverUrl, true)) return true
     }
     await sleep(500)
   }
@@ -310,6 +340,7 @@ function startServer() {
     if (m) {
       serverUrl = m[0].replace(/\/+$/, '')
       serverUrlResolved = true
+      log(`[boot] 解析到 dsh 地址：${serverUrl}`)
     }
   })
 
@@ -362,7 +393,20 @@ function createWindow() {
 
   // 在主界面（dsh web）注入"关于"入口：集成到顶栏 "Session log" 按钮左侧，
   // 并在右上角保留"？"按钮作为兜底
-  mainWindow.webContents.on('did-finish-load', injectDesktopButton)
+  // 页面加载失败（网络层）时落到错误页并记录，避免用户只看到一片黑
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    log(`[boot] 页面加载失败 code=${code} desc=${desc} url=${url}`)
+    // -3 是用户主动中断（如跳转），忽略
+    if (code !== -3 && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadFile(path.join(__dirname, 'error.html')).catch(() => {})
+    }
+  })
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    // 加载页/错误页也需要看到已累积的 dsh 输出，便于用户自查
+    sendLog(serverLogs)
+    injectDesktopButton()
+  })
   mainWindow.webContents.on('did-navigate-in-page', injectDesktopButton)
 
   mainWindow.on('closed', () => {
@@ -370,50 +414,72 @@ function createWindow() {
   })
 }
 
+/** 结束占用 3080 端口的进程（排除自身），用于清理残留的 dsh 实例 */
+function killPortOccupants() {
+  if (!isWin) return
+  try {
+    const out = require('child_process').execSync(
+      `netstat -ano | findstr :${DEFAULT_PORT} | findstr LISTENING`
+    )
+    const lines = (out || '').toString().split(/\r?\n/)
+    const pids = new Set()
+    for (const line of lines) {
+      const pid = line.trim().split(/\s+/).pop()
+      if (pid && /^\d+$/.test(pid) && pid !== String(process.pid)) pids.add(pid)
+    }
+    for (const pid of pids) {
+      try {
+        spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true })
+      } catch (_) {}
+    }
+    log(`[boot] 已清理占用 3080 的进程：${[...pids].join(', ') || '(无)'}`)
+  } catch (e) {
+    log('[boot] 清理占用进程失败：' + (e && e.message))
+  }
+}
+
 async function boot() {
   createWindow()
+  log('=== 应用启动 ===')
 
   nodeCommand = await ensureNode()
   if (!nodeCommand) return
+  log(`[boot] 使用 Node：${nodeCommand}`)
 
-  // 端口已被其他程序占用（可能是残留的 dsh 实例或别的程序）。
-  if (await checkHttp(serverUrl)) {
-    const r = await dialog.showMessageBox({
-      type: 'warning',
-      buttons: ['关闭占用进程并重启', '直接连接现有服务', '退出'],
-      defaultId: 0,
-      cancelId: 2,
-      title: '端口 3080 已被占用',
-      message: `检测到 ${serverUrl} 已有服务在运行。`,
-      detail:
-        '为避免连接到残留/异常实例导致插件加载失败，建议关闭占用进程后由本应用重新启动 dsh。',
-    })
-    if (r.response === 0) {
-      if (isWin) {
-        const out = require('child_process').execSync(
-          `netstat -ano | findstr :${DEFAULT_PORT} | findstr LISTENING`
-        )
-        const lines = (out || '').toString().split(/\r?\n/)
-        const pids = new Set()
-        for (const line of lines) {
-          const pid = line.trim().split(/\s+/).pop()
-          if (pid && /^\d+$/.test(pid) && pid !== String(process.pid)) pids.add(pid)
-        }
-        for (const pid of pids) {
-          try {
-            spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true })
-          } catch (_) {}
-        }
-        await sleep(1500)
-      }
-    } else if (r.response === 1) {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.loadURL(serverUrl)
-      }
-      return
+  // 端口占用检查：
+  //  - 有响应但**不可用**（如 401 鉴权拒绝）→ 一定是残留的旧实例（我们拿不到它的 token），
+  //    直接清理并重启，避免弹一个用户看不懂、还挡在黑屏窗口后面的对话框。
+  //  - 有响应且可用（2xx）→ 交给用户选择（原有逻辑）。
+  if (await checkHttp(serverUrl, false)) {
+    const usable = await checkHttp(serverUrl, true)
+    log(`[boot] 3080 已被占用（可用=${usable}）`)
+    if (!usable) {
+      log('[boot] 3080 上是不可用的残留服务（要求鉴权），自动清理后重启 dsh')
+      killPortOccupants()
+      await sleep(2000)
     } else {
-      app.quit()
-      return
+      const r = await dialog.showMessageBox({
+        type: 'warning',
+        buttons: ['关闭占用进程并重启', '直接连接现有服务', '退出'],
+        defaultId: 0,
+        cancelId: 2,
+        title: '端口 3080 已被占用',
+        message: `检测到 ${serverUrl} 已有服务在运行。`,
+        detail:
+          '为避免连接到残留/异常实例导致插件加载失败，建议关闭占用进程后由本应用重新启动 dsh。',
+      })
+      if (r.response === 0) {
+        killPortOccupants()
+        await sleep(1500)
+      } else if (r.response === 1) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.loadURL(serverUrl)
+        }
+        return
+      } else {
+        app.quit()
+        return
+      }
     }
   }
 
@@ -421,6 +487,7 @@ async function boot() {
   // 避免连接到端口上残留/半死的旧实例导致插件加载异常。
   if (serverProc) return
   if (!startServer()) {
+    log('[boot] startServer 失败，显示错误页')
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.loadFile(path.join(__dirname, 'error.html'))
     }
@@ -428,10 +495,13 @@ async function boot() {
   }
 
   const ready = await waitForServer()
+  log(`[boot] waitForServer -> ${ready}（url=${serverUrl} resolved=${serverUrlResolved}）`)
 
   if (ready && mainWindow && !mainWindow.isDestroyed()) {
+    log('[boot] 加载 dsh 界面：' + serverUrl)
     mainWindow.loadURL(serverUrl)
   } else if (mainWindow && !mainWindow.isDestroyed()) {
+    log('[boot] 服务未就绪，显示错误页')
     mainWindow.loadFile(path.join(__dirname, 'error.html'))
   }
 }

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
     <title>正在启动 DeepSeek Harness</title>
     <style>
       :root { color-scheme: dark; }
@@ -41,6 +41,24 @@
     <div class="spinner"></div>
     <h1>DeepSeek Harness</h1>
     <p>正在启动内置 dsh 服务（http://127.0.0.1:3080），请稍候…</p>
-    <span class="badge">首次启动可能需要数秒</span>
+    <span class="badge">已等待 <span id="elapsed">0</span> 秒</span>
+    <p id="hint" style="max-width: 460px; text-align: center; line-height: 1.7">
+      首次启动或升级后需要初始化运行时，通常需要 30–90 秒，请耐心等待。
+    </p>
+    <script>
+      // 让用户知道程序仍在工作（dsh 首次启动/升级后重建 profile 可能耗时较久）
+      var sec = 0
+      var el = document.getElementById('elapsed')
+      var hint = document.getElementById('hint')
+      setInterval(function () {
+        sec++
+        if (el) el.textContent = sec
+        if (sec === 60 && hint) {
+          hint.textContent = '已等待 1 分钟。首次初始化较慢属于正常现象；若超过 3 分钟仍无响应，请关闭后重新打开。'
+        } else if (sec === 150 && hint) {
+          hint.textContent = '已等待较长时间，建议关闭应用后重新打开（第二次启动会快很多）。'
+        }
+      }, 1000)
+    </script>
   </body>
 </html>

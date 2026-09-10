@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
     <title>DeepSeek Harness 启动失败</title>
     <style>
       :root { color-scheme: dark; }
@@ -53,9 +53,13 @@
     <div class="dot">!</div>
     <h1>无法启动 DeepSeek Harness</h1>
     <p>内置的 dsh 服务未能正常启动。请检查下方日志，或确认端口 3080 未被其他程序占用。</p>
+    <p style="font-size: 13px; color: #8b96ad">
+      排查建议：① 关闭应用后重新打开（第二次启动通常更快）；② 确认没有其他 DeepSeek Harness / dsh 进程残留；
+      ③ 详细启动日志见 <code style="color: #9db9ff">%APPDATA%\DeepSeek Harness\logs\boot.log</code>
+    </p>
     <pre id="log">（暂无日志）</pre>
     <button onclick="window.location.reload()">重试</button>
-    <span class="hint">如需帮助，可前往 https://github.com/deepseek-ai/deepseek-harness</span>
+    <span class="hint">如需帮助，可前往 https://github.com/cnskycn/deepseek-harness-desktop/issues</span>
     <script>
       const logEl = document.getElementById('log')
       if (window.dshDesktop && window.dshDesktop.onLog) {
