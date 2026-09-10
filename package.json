@@ -1,10 +1,34 @@
 {
   "name": "deepseek-harness-desktop",
   "version": "1.4.3",
-  "description": "DeepSeek Harness (dsh) 一键安装桌面版 —— 内置 Node.js 运行时与 Web UI，双击即可使用",
+  "description": "DeepSeek Harness (dsh) 桌面外壳 / dsh desktop shell —— Windows 一键安装，内置 dsh 运行时与 portable Node.js，双击即用",
   "author": "DeepSeek Harness Desktop",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "private": true,
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "desktop-shell",
+    "desktop",
+    "electron",
+    "windows",
+    "agent-harness",
+    "ai-agent",
+    "installer"
+  ],
+  "homepage": "https://github.com/cnskycn/deepseek-harness-desktop#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cnskycn/deepseek-harness-desktop.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cnskycn/deepseek-harness-desktop/issues"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",

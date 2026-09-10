@@ -2,14 +2,36 @@
 
 # DeepSeek Harness Desktop
 
-把 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 的 Web UI 封装为 **Windows 桌面应用**，一键安装、双击即用。
+把 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 的 Web UI 封装为 **Windows 桌面应用（dsh desktop shell）**，一键安装、双击即用。
+
+> 万物皆「插件」——DeepSeek Harness 里桌面本身也是一种**插件形态**。本项目即 dsh 的 Windows 桌面外壳（desktop shell / desktop app wrapper）。
+> 独立的社区开源项目，与 DeepSeek 不存在隶属、合作、授权或背书关系。
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078d6)
-![dsh](https://img.shields.io/badge/dsh-0.1.1--rc.2-4b6bff)
+![dsh](https://img.shields.io/badge/dsh-0.1.5--rc.1-4b6bff)
 ![Node](https://img.shields.io/badge/node-%3E%3D22.19-339933)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-Apache--2.0-green)
+![dsh-plugin](https://img.shields.io/badge/dsh--plugin-desktop%20shell-8a5bff)
 
 </div>
+
+## 🧭 兼容性与适用范围
+
+供插件注册表与使用者核对（版本相关，随 dsh 预览版演进需复核）：
+
+| 项目 | 说明 |
+|---|---|
+| 类型 | Desktop shell（桌面外壳），非 Cordis 运行时插件；不通过 `dsh plugin add` 安装 |
+| 宿主 dsh 版本 | `@deepseek-ai/dsh@0.1.5-rc.1`（**随安装包内置、版本固定**，无需用户自备） |
+| 支持的 profile | `web`（桌面窗口内运行 dsh Web UI） |
+| 平台 | Windows x64（Windows 10 / 11） |
+| 运行时 | 内置 portable Node.js ≥ 22.19（含 `node:zlib` zstd），无需系统安装 Node |
+| 网络服务 | 仅监听本机 `127.0.0.1:3080`；不对外暴露端口 |
+| 外部服务 | 用户自行配置的模型提供方（如 DeepSeek API）、MCP 服务器；本项目不内置任何第三方凭据 |
+| 权限 | 不请求管理员权限（`perMachine` 安装时由安装器按需提升）；沙箱/审批/权限沿用 dsh 自身机制 |
+| 自动更新 | electron-updater；默认 GitHub Releases，可切换 `generic`（国内 CDN/对象存储）或 Gitee 通道 |
+
+> ⚠️ 上游 dsh 处于 developer preview，API 可能变更；本项目的兼容性表述**与 `1.4.3` / `dsh 0.1.5-rc.1` 版本绑定**。
 
 ## ✨ 特性
 
@@ -18,13 +40,15 @@
 - 📦 **内置 Node.js 运行时**：安装包内置 portable Node.js（不含 npm），开箱即用，无需系统安装 Node，无 UAC
 - 🛡️ **干净的服务管理**：每次启动全新 dsh 实例，退出应用自动回收进程，杜绝残留实例冲突
 - 🌐 **内置完整 dsh**：安装包包含 `@deepseek-ai/dsh` 全部依赖，无需自行安装 Harness
-- 🔔 **托盘菜单**：系统托盘右键可「检查更新」「关于 / 版本」「显示主界面」「退出」
+- 🔔 **托盘菜单**：显示主界面、在浏览器打开 Web UI、复制 Web 访问地址、检查更新、关于、退出
+- 🎨 **统一品牌图标**：桌面快捷方式 / 开始菜单 / 系统托盘 / 安装包统一图标
+- 🔄 **多通道自动更新**：GitHub Releases（默认）/ generic 自定义 URL（国内对象存储、CDN）/ Gitee
 
 ## 📦 使用
 
 1. 从 [Releases](https://github.com/cnskycn/deepseek-harness-desktop/releases) 下载最新安装包：
 
-   [![Download](https://img.shields.io/badge/download-DeepSeek%20Harness%20v1.4.0-blue?style=for-the-badge&logo=windows)](https://github.com/cnskycn/deepseek-harness-desktop/releases/download/v1.4.0/DeepSeek-Harness-Setup-1.4.0.exe)
+   [![Download](https://img.shields.io/badge/download-DeepSeek%20Harness%20v1.4.3-blue?style=for-the-badge&logo=windows)](https://github.com/cnskycn/deepseek-harness-desktop/releases/download/v1.4.3/DeepSeek-Harness-Setup-1.4.3.exe)
 
 2. 运行安装包（安装后自动创建桌面/开始菜单快捷方式）
 3. 打开「DeepSeek Harness」
@@ -108,11 +132,14 @@ A: 若安装被 SmartScreen/杀软拦截会中断。请点「更多信息 → �
 A: 多为端口残留旧实例导致，已在新版本中修复。请关闭所有 DeepSeek Harness 进程后重启。
 
 **Q: 安装包有多大？为什么那么大？**
-A: 约 140MB。包含内置 portable Node.js + `@deepseek-ai/dsh` 全部依赖（已剔除 PDB 调试符号、类型声明、源地图等冗余），保证离线开箱即用。
+A: 约 148MB。包含内置 portable Node.js + `@deepseek-ai/dsh` 全部依赖（已剔除 PDB 调试符号、类型声明、源地图、文档等约 1.2 万个冗余文件），保证离线开箱即用。
+
+**Q: 为什么用浏览器打开 `127.0.0.1:3080` 提示 authentication required？**
+A: dsh 0.1.2 起对 Web 界面启用了链接内一次性 token 鉴权，裸访问端口会被拒绝。请使用托盘菜单的「**在浏览器打开 Web UI**」或「**复制 Web 访问地址**」，它们携带有效凭证。
 
 ## 📄 许可
 
-MIT © DeepSeek Harness Desktop contributors
+Apache-2.0 © DeepSeek Harness Desktop contributors
 
 ## 🙏 致谢
 
