@@ -29,7 +29,7 @@
 | 网络服务 | 仅监听本机 `127.0.0.1:3080`；不对外暴露端口 |
 | 外部服务 | 用户自行配置的模型提供方（如 DeepSeek API）、MCP 服务器；本项目不内置任何第三方凭据 |
 | 权限 | 不请求管理员权限（`perMachine` 安装时由安装器按需提升）；沙箱/审批/权限沿用 dsh 自身机制 |
-| 自动更新 | electron-updater；默认 GitHub Releases，可切换 `generic`（国内 CDN/对象存储）或 Gitee 通道 |
+| 自动更新 | electron-updater **双通道**：主 = CNB 国内 CDN（`generic`），备 = GitHub Releases（主通道失败自动回退）；另支持 Gitee 通道 |
 
 > ⚠️ 上游 dsh 处于 developer preview，API 可能变更；本项目的兼容性表述**与 `1.4.3` / `dsh 0.1.5-rc.1` 版本绑定**。
 
@@ -46,9 +46,15 @@
 
 ## 📦 使用
 
-1. 从 [Releases](https://github.com/cnskycn/deepseek-harness-desktop/releases) 下载最新安装包：
+1. 下载最新安装包（**国内推荐 CNB 节点，速度快**）：
 
-   [![Download](https://img.shields.io/badge/download-DeepSeek%20Harness%20v1.4.3-blue?style=for-the-badge&logo=windows)](https://github.com/cnskycn/deepseek-harness-desktop/releases/download/v1.4.3/DeepSeek-Harness-Setup-1.4.3.exe)
+  [![Download CNB](https://img.shields.io/badge/download-CNB%20%E5%9B%BD%E5%86%85%E8%8A%82%E7%82%B9-success?style=for-the-badge&logo=windows)](https://cnb.cool/cnskycn/deepseek-harness-desktop/-/releases/download/latest/DeepSeek-Harness-Setup-1.4.4.exe)
+  [![Download GitHub](https://img.shields.io/badge/download-GitHub-blue?style=for-the-badge&logo=github)](https://github.com/cnskycn/deepseek-harness-desktop/releases/download/v1.4.4/DeepSeek-Harness-Setup-1.4.4.exe)
+
+  | 通道 | 地址 | 说明 |
+  |---|---|---|
+  | **CNB（推荐）** | `https://cnb.cool/cnskycn/deepseek-harness-desktop/-/releases/download/latest/DeepSeek-Harness-Setup-1.4.4.exe` | 腾讯云 CDN，国内直连；`latest` 路径始终指向最新版 |
+  | GitHub | `https://github.com/cnskycn/deepseek-harness-desktop/releases` | 海外/备用 |
 
 2. 运行安装包（安装后自动创建桌面/开始菜单快捷方式）
 3. 打开「DeepSeek Harness」
