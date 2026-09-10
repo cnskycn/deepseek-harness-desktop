@@ -475,6 +475,19 @@ function setupAutoUpdater() {
         channel: cfg.channel || 'latest',
         token: process.env.GITEE_TOKEN || null,
       })
+    } else if (provider === 'generic' || provider === 'custom-url') {
+      // 通用 HTTP 通道：把 latest.yml 与安装包托管在任意可直链访问的服务器上
+      // （国内对象存储 / CDN，如七牛、腾讯云 COS、阿里云 OSS 等）。
+      // electron-updater 会按 `${url}latest.yml` 拉取版本信息、再按其中的 url 下载安装包。
+      let base = String(cfg.url || '').trim()
+      if (!base) throw new Error('provider=generic 需要在 updater.config.json 中提供 url')
+      if (!/^https?:\/\//i.test(base)) throw new Error('updater.config.json 的 url 必须以 http:// 或 https:// 开头')
+      if (!base.endsWith('/')) base += '/'
+      autoUpdater.setFeedURL({
+        provider: 'generic',
+        url: base,
+        channel: cfg.channel || 'latest',
+      })
     } else {
       // GitHub Releases 原生通道（默认）
       autoUpdater.setFeedURL({
