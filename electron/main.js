@@ -451,6 +451,60 @@ function stopServer() {
 
 /* ---------------- 自动更新（GitHub / Gitee 发布通道） ---------------- */
 
+/** 更新通道配置（主/备），由 setupAutoUpdater 填充 */
+let updateChannel = { primary: null, fallback: null }
+
+/** 把一份通道配置转换为 electron-updater 的 setFeedURL 参数 */
+function feedConfigOf(c) {
+  const provider = (c.provider || 'github').toLowerCase()
+  if (provider === 'gitee') {
+    return {
+      provider: 'custom',
+      updateProvider: GiteeProvider,
+      owner: c.owner,
+      repo: c.repo,
+      channel: c.channel || 'latest',
+      token: process.env.GITEE_TOKEN || null,
+    }
+  }
+  if (provider === 'generic' || provider === 'custom-url') {
+    let base = String(c.url || '').trim()
+    if (!base) throw new Error('provider=generic 需要在 updater.config.json 中提供 url')
+    if (!/^https?:\/\//i.test(base)) throw new Error('updater.config.json 的 url 必须以 http:// 或 https:// 开头')
+    if (!base.endsWith('/')) base += '/'
+    return { provider: 'generic', url: base, channel: c.channel || 'latest' }
+  }
+  return {
+    provider: 'github',
+    owner: c.owner,
+    repo: c.repo,
+    token: process.env.GITHUB_TOKEN || null,
+  }
+}
+
+/** 应用指定通道（'primary' | 'fallback'） */
+function applyFeed(which) {
+  const c = which === 'fallback' ? updateChannel.fallback : updateChannel.primary
+  if (!c) throw new Error('未配置 ' + which + ' 更新通道')
+  autoUpdater.setFeedURL(feedConfigOf(c))
+}
+
+/**
+ * 检查更新：优先走主通道（如 CNB 国内 CDN），失败时自动回退备用通道（如 GitHub）。
+ * 返回值与 autoUpdater.checkForUpdates() 一致。
+ */
+async function checkForUpdatesWithFallback() {
+  try {
+    applyFeed('primary')
+    return await autoUpdater.checkForUpdates()
+  } catch (e) {
+    if (!updateChannel.fallback) throw e
+    console.warn('[updater] 主通道失败，回退备用通道：', e && e.message)
+    applyFeed('fallback')
+    return autoUpdater.checkForUpdates()
+  }
+}
+
 function setupAutoUpdater() {
   let cfg
   try {
@@ -458,45 +512,22 @@ function setupAutoUpdater() {
   } catch (_) {
     return // 没有配置文件则不启用更新
   }
-  if (!cfg.owner || !cfg.repo) {
+  const primaryIsGeneric = ['generic', 'custom-url'].includes(String(cfg.provider || '').toLowerCase())
+  if (primaryIsGeneric) {
+    if (!cfg.url) {
+      console.log('[updater] provider=generic 但未配置 url，跳过自动更新')
+      return
+    }
+  } else if (!cfg.owner || !cfg.repo) {
     console.log('[updater] 未配置更新仓库（owner/repo），跳过自动更新')
     return
   }
-  const provider = (cfg.provider || 'github').toLowerCase()
+  // 主通道 = cfg 本身（国内优先，如 CNB 的 generic 通道）；
+  // 备用通道 = cfg.fallback（主通道不可用时回退，如 GitHub Releases）
+  updateChannel = { primary: cfg, fallback: cfg.fallback || null }
 
   try {
-    if (provider === 'gitee') {
-      // Gitee Releases 自定义通道（国内快，但需用 publish-gitee.js 发布）
-      autoUpdater.setFeedURL({
-        provider: 'custom',
-        updateProvider: GiteeProvider,
-        owner: cfg.owner,
-        repo: cfg.repo,
-        channel: cfg.channel || 'latest',
-        token: process.env.GITEE_TOKEN || null,
-      })
-    } else if (provider === 'generic' || provider === 'custom-url') {
-      // 通用 HTTP 通道：把 latest.yml 与安装包托管在任意可直链访问的服务器上
-      // （国内对象存储 / CDN，如七牛、腾讯云 COS、阿里云 OSS 等）。
-      // electron-updater 会按 `${url}latest.yml` 拉取版本信息、再按其中的 url 下载安装包。
-      let base = String(cfg.url || '').trim()
-      if (!base) throw new Error('provider=generic 需要在 updater.config.json 中提供 url')
-      if (!/^https?:\/\//i.test(base)) throw new Error('updater.config.json 的 url 必须以 http:// 或 https:// 开头')
-      if (!base.endsWith('/')) base += '/'
-      autoUpdater.setFeedURL({
-        provider: 'generic',
-        url: base,
-        channel: cfg.channel || 'latest',
-      })
-    } else {
-      // GitHub Releases 原生通道（默认）
-      autoUpdater.setFeedURL({
-        provider: 'github',
-        owner: cfg.owner,
-        repo: cfg.repo,
-        token: process.env.GITHUB_TOKEN || null,
-      })
-    }
+    applyFeed('primary')
     autoUpdater.allowPrerelease = !!cfg.allowPrerelease
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
@@ -556,7 +587,7 @@ function setupAutoUpdater() {
       }
     })
 
-    autoUpdater.checkForUpdates().catch(() => {})
+    checkForUpdatesWithFallback().catch(() => {})
   } catch (e) {
     console.error('[updater] 初始化失败：', e && (e.stack || e.message))
   }
@@ -765,7 +796,7 @@ async function runUpdateCheck(ref, sender) {
     // 注意：不能用 `!r.updateInfo` 判断"已是最新" —— electron-updater 无论有无
     // 更新都会返回 updateInfo（远端 latest.yml 内容）。结果统一由
     // update-available / update-not-available 事件驱动呈现。
-    await autoUpdater.checkForUpdates()
+    await checkForUpdatesWithFallback()
   } catch (e) {
     const msg = (e && (e.message || e.stack)) || String(e)
     if (ref === 'dialog') {

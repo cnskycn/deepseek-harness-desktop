@@ -1,7 +1,11 @@
 {
-  "provider": "github",
-  "owner": "cnskycn",
-  "repo": "deepseek-harness-desktop",
+  "provider": "generic",
+  "url": "https://cnb.cool/cnskycn/deepseek-harness-desktop/-/releases/download/latest/",
   "channel": "latest",
-  "allowPrerelease": false
+  "allowPrerelease": false,
+  "fallback": {
+    "provider": "github",
+    "owner": "cnskycn",
+    "repo": "deepseek-harness-desktop"
+  }
 }
