@@ -12,3 +12,5 @@ gh-*.txt
 gh-*.json
 plugins-*.md
 *.dump.txt
+logs/
+releases_raw.json

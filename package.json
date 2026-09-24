@@ -36,7 +36,9 @@
     "build": "node scripts/build.js",
     "dist": "electron-builder --win nsis",
     "release": "electron-builder --win nsis --publish onTag",
-    "publish:cnb": "node scripts/publish-cnb.js --repo cnskycn/deepseek-harness-desktop --tag latest"
+    "publish:cnb": "node scripts/publish-cnb.js --repo cnskycn/deepseek-harness-desktop --tag latest",
+    "publish:github": "node scripts/publish-github.cjs --repo cnskycn/deepseek-harness-desktop",
+    "gen:latest-yml": "node scripts/gen-latest-yml.cjs"
   },
   "devDependencies": {
     "electron": "43.4.0",
