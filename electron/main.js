@@ -316,6 +316,45 @@ function dshBinPath() {
   return path.join(resDir, 'dsh', 'runtime', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
 }
 
+/**
+ * 清理 dsh 遗留的文件锁（自愈）。
+ *
+ * 背景：dsh 用文件锁保护 `.credentials.yaml`、profile 模块等共享资源。
+ * 若上次 dsh 是被**强制结束**的（关机、任务管理器结束进程、崩溃、安装器覆盖安装），
+ * 锁文件不会被释放，下次启动会因
+ *   `atomic-write: timed out waiting for the writer lock`
+ * 导致必需插件 `connection` 激活失败、整个应用起不来。
+ *
+ * 因此：在**确认本机没有 dsh 在运行**（3080 无服务）后，清理 ~/.dsh 下的残留锁。
+ * 只在真正要启动自己的 dsh 实例前调用，不会影响其他正在运行的实例。
+ */
+function cleanupStaleLocks() {
+  const home = process.env.USERPROFILE || process.env.HOME
+  if (!home) return
+  const roots = [path.join(home, '.dsh'), path.join(home, '.dsh', 'profiles')]
+  let removed = 0
+  for (const root of roots) {
+    let entries = []
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true })
+    } catch (_) {
+      continue
+    }
+    for (const e of entries) {
+      if (!e.isFile() || !e.name.endsWith('.lock')) continue
+      const p = path.join(root, e.name)
+      try {
+        fs.unlinkSync(p)
+        removed++
+        log(`[boot] 清理残留锁：${p}`)
+      } catch (err) {
+        log(`[boot] 清理锁失败（忽略）：${p} ${err && err.message}`)
+      }
+    }
+  }
+  if (removed) log(`[boot] 共清理 ${removed} 个残留锁文件`)
+}
+
 /** V8 编译缓存目录（放 userData：可写、随用户升级保留、不污染安装目录）。 */
 function compileCacheDir() {
   const dir = path.join(app.getPath('userData'), 'compile-cache')
@@ -568,6 +607,11 @@ async function boot() {
   // 桌面应用独占 3080 服务：总是由本进程启动一个干净、全新的 dsh 实例，
   // 避免连接到端口上残留/半死的旧实例导致插件加载异常。
   if (serverProc) return
+
+  // 走到这里说明本机没有可用的 dsh 在跑，清理上次被强制结束可能留下的文件锁，
+  // 否则 dsh 的 connection 插件会因拿不到 ~/.dsh/.credentials.yaml.lock 而启动失败。
+  cleanupStaleLocks()
+
   if (!startServer()) {
     log('[boot] startServer 失败，显示错误页')
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -589,16 +633,24 @@ async function boot() {
 }
 
 function stopServer() {
-  if (serverProc) {
-    try {
-      if (isWin) {
-        spawn('taskkill', ['/pid', String(serverProc.pid), '/T', '/F'], { windowsHide: true })
-      } else {
-        serverProc.kill('SIGTERM')
-      }
-    } catch (_) {}
-    serverProc = null
-  }
+  const proc = serverProc
+  if (!proc) return
+  serverProc = null
+  try {
+    if (isWin) {
+      // 先温和终止（不带 /F）：给 dsh 机会释放文件锁并落盘状态，
+      // 避免下次启动撞上残留锁（表现为 connection 插件激活失败）。
+      spawn('taskkill', ['/pid', String(proc.pid), '/T'], { windowsHide: true })
+      const pid = proc.pid
+      setTimeout(() => {
+        try {
+          spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true })
+        } catch (_) {}
+      }, 1800)
+    } else {
+      proc.kill('SIGTERM')
+    }
+  } catch (_) {}
 }
 
 /* ---------------- 自动更新（GitHub / Gitee 发布通道） ---------------- */

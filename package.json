@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "description": "DeepSeek Harness (dsh) 桌面外壳 / dsh desktop shell —— Windows 一键安装，内置 dsh 运行时与 portable Node.js，双击即用",
   "author": "DeepSeek Harness Desktop",
   "license": "Apache-2.0",
