@@ -8,7 +8,7 @@
 > 独立的社区开源项目，与 DeepSeek 不存在隶属、合作、授权或背书关系。
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078d6)
-![dsh](https://img.shields.io/badge/dsh-0.1.5--rc.1-4b6bff)
+![dsh](https://img.shields.io/badge/dsh-0.1.7--rc.1-4b6bff)
 ![Node](https://img.shields.io/badge/node-%3E%3D22.19-339933)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
 ![dsh-plugin](https://img.shields.io/badge/dsh--plugin-desktop%20shell-8a5bff)
@@ -22,7 +22,7 @@
 | 项目 | 说明 |
 |---|---|
 | 类型 | Desktop shell（桌面外壳），非 Cordis 运行时插件；不通过 `dsh plugin add` 安装 |
-| 宿主 dsh 版本 | `@deepseek-ai/dsh@0.1.5-rc.1`（**随安装包内置、版本固定**，无需用户自备） |
+| 宿主 dsh 版本 | `@deepseek-ai/dsh@0.1.7-rc.1`（**随安装包内置、版本固定**，无需用户自备） |
 | 支持的 profile | `web`（桌面窗口内运行 dsh Web UI） |
 | 平台 | Windows x64（Windows 10 / 11） |
 | 运行时 | 内置 portable Node.js ≥ 22.19（含 `node:zlib` zstd），无需系统安装 Node |
@@ -31,7 +31,7 @@
 | 权限 | 不请求管理员权限（`perMachine` 安装时由安装器按需提升）；沙箱/审批/权限沿用 dsh 自身机制 |
 | 自动更新 | electron-updater **双通道**：主 = CNB 国内 CDN（`generic`），备 = GitHub Releases（主通道失败自动回退）；另支持 Gitee 通道 |
 
-> ⚠️ 上游 dsh 处于 developer preview，API 可能变更；本项目的兼容性表述**与 `1.4.3` / `dsh 0.1.5-rc.1` 版本绑定**。
+> ⚠️ 上游 dsh 处于 developer preview，API 可能变更；本项目的兼容性表述**与 `1.4.7` / `dsh 0.1.7-rc.1` 版本绑定**。
 
 ## ✨ 特性
 
@@ -48,8 +48,8 @@
 
 1. 下载最新安装包（**国内推荐 CNB 节点，速度快**）：
 
-  [![Download CNB](https://img.shields.io/badge/download-CNB%20%E5%9B%BD%E5%86%85%E8%8A%82%E7%82%B9-success?style=for-the-badge&logo=windows)](https://cnb.cool/cnskycn/deepseek-harness-desktop/-/releases/download/latest/DeepSeek-Harness-Setup-1.4.4.exe)
-  [![Download GitHub](https://img.shields.io/badge/download-GitHub-blue?style=for-the-badge&logo=github)](https://github.com/cnskycn/deepseek-harness-desktop/releases/download/v1.4.4/DeepSeek-Harness-Setup-1.4.4.exe)
+  [![Download CNB](https://img.shields.io/badge/download-CNB%20%E5%9B%BD%E5%86%85%E8%8A%82%E7%82%B9-success?style=for-the-badge&logo=windows)](https://cnb.cool/cnskycn/deepseek-harness-desktop/-/releases/download/latest/DeepSeek-Harness-Setup-1.4.7.exe)
+  [![Download GitHub](https://img.shields.io/badge/download-GitHub-blue?style=for-the-badge&logo=github)](https://github.com/cnskycn/deepseek-harness-desktop/releases/download/v1.4.7/DeepSeek-Harness-Setup-1.4.7.exe)
 
   | 通道 | 地址 | 说明 |
   |---|---|---|

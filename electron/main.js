@@ -142,6 +142,66 @@ function nodeHasZstd(cmd) {
   return r.ok && r.out === 'function'
 }
 
+/**
+ * Node 能力探测缓存文件路径（userData/cache/node-check.json）。
+ * 用 userData 而非安装目录：安装目录可能只读，且升级后应重新探测。
+ */
+function nodeCheckCachePath() {
+  try {
+    const dir = path.join(app.getPath('userData'), 'cache')
+    fs.mkdirSync(dir, { recursive: true })
+    return path.join(dir, 'node-check.json')
+  } catch (_) {
+    return null
+  }
+}
+
+/**
+ * 一次性探测 Node 版本与 zstd 能力（合并为**单次** spawn）。
+ * 旧实现分别 spawn 两次（`node -v` 与 `node -e`），在 Windows 上每次进程创建
+ * 约 100–500ms，杀毒软件实时扫描下更久——这是启动耗时里可省掉的一部分。
+ */
+function probeNode(cmd) {
+  const r = runCapture(cmd, [
+    '-e',
+    'const z=require("node:zlib");process.stdout.write(process.version+"|"+typeof z.createZstdDecompress)',
+  ])
+  if (!r.ok || !r.out) return null
+  const [ver, zstd] = r.out.split('|')
+  return { version: String(ver || '').replace(/^v/, ''), zstd: zstd === 'function' }
+}
+
+/**
+ * 内置 Node 是否可用（版本达标且支持 zstd）。
+ * 以「路径 + 大小 + mtime」作为缓存键；命中则直接返回，不做任何子进程调用。
+ */
+function isBundledNodeUsable(exe) {
+  let st = null
+  try {
+    st = fs.statSync(exe)
+  } catch (_) {
+    return false
+  }
+  const key = `${exe}|${st.size}|${Math.round(st.mtimeMs)}`
+  const cacheFile = nodeCheckCachePath()
+  if (cacheFile) {
+    try {
+      const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'))
+      if (cached && cached.key === key && cached.ok) return true
+    } catch (_) {
+      /* 缓存缺失或损坏：继续走实测 */
+    }
+  }
+  const probe = probeNode(exe)
+  const ok = !!(probe && versionGte(probe.version, MIN_NODE_VERSION) && probe.zstd)
+  if (cacheFile) {
+    try {
+      fs.writeFileSync(cacheFile, JSON.stringify({ key, ok, version: probe && probe.version }))
+    } catch (_) {}
+  }
+  return ok
+}
+
 function versionGte(a, b) {
   const A = String(a).split('.').map((n) => parseInt(n, 10) || 0)
   const B = String(b).split('.').map((n) => parseInt(n, 10) || 0)
@@ -194,11 +254,10 @@ function tryInstallNodeViaWinget() {
 async function ensureNode() {
   for (;;) {
     // 1) 优先使用内置 portable Node.js（开箱即用，无需系统安装）
+    //    结果带缓存：命中时完全不 spawn 子进程，避免每次启动都付进程创建开销。
     const bundled = bundledNodePath()
     if (bundled && fs.existsSync(bundled)) {
-      const bv = nodeVersion(bundled)
-      const bZstd = nodeHasZstd(bundled)
-      if (bv && versionGte(bv, MIN_NODE_VERSION) && bZstd) return bundled
+      if (isBundledNodeUsable(bundled)) return bundled
     }
 
     // 2) 回退：检测系统 Node.js
@@ -257,6 +316,15 @@ function dshBinPath() {
   return path.join(resDir, 'dsh', 'runtime', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
 }
 
+/** V8 编译缓存目录（放 userData：可写、随用户升级保留、不污染安装目录）。 */
+function compileCacheDir() {
+  const dir = path.join(app.getPath('userData'), 'compile-cache')
+  try {
+    fs.mkdirSync(dir, { recursive: true })
+  } catch (_) {}
+  return dir
+}
+
 function workspaceDir() {
   const dir = process.env.DSH_WORKSPACE || path.join(app.getPath('documents'), 'DeepSeekHarness')
   try {
@@ -304,7 +372,9 @@ async function waitForServer(timeoutMs = STARTUP_TIMEOUT_MS) {
       log(`[boot] ${fallbackToDefaultMs / 1000}s 内未收到 dsh 输出的地址，退化探测默认地址`)
       if (await checkHttp(serverUrl, true)) return true
     }
-    await sleep(500)
+    // 已拿到带 token 的地址说明 dsh 正在收尾，用更短间隔尽快切界面；
+    // 尚未拿到时保持较疏轮询，避免无谓空转。
+    await sleep(serverUrlResolved ? 120 : 300)
   }
   return false
 }
@@ -327,7 +397,14 @@ function startServer() {
 
   serverProc = spawn(nodeCommand, [dshBin, 'web', '--no-open'], {
     cwd,
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      // Node 的 V8 编译缓存：dsh 模块数以万计，首次启动写入、后续启动直接复用编译结果，
+      // 可显著缩短初始化时间（进程正常退出时刷盘，故 stopServer 采用优雅终止）。
+      NODE_COMPILE_CACHE: compileCacheDir(),
+      // 抑制启动期警告输出，减少 stderr 写管道的开销
+      NODE_NO_WARNINGS: '1',
+    },
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -442,7 +519,12 @@ async function boot() {
   createWindow()
   log('=== 应用启动 ===')
 
-  nodeCommand = await ensureNode()
+  // Node 检测（通常命中缓存）与 3080 占用探测互不依赖，**并行执行**以缩短启动关键路径。
+  const [resolvedNode, portOccupied] = await Promise.all([
+    ensureNode(),
+    checkHttp(serverUrl, false),
+  ])
+  nodeCommand = resolvedNode
   if (!nodeCommand) return
   log(`[boot] 使用 Node：${nodeCommand}`)
 
@@ -450,7 +532,7 @@ async function boot() {
   //  - 有响应但**不可用**（如 401 鉴权拒绝）→ 一定是残留的旧实例（我们拿不到它的 token），
   //    直接清理并重启，避免弹一个用户看不懂、还挡在黑屏窗口后面的对话框。
   //  - 有响应且可用（2xx）→ 交给用户选择（原有逻辑）。
-  if (await checkHttp(serverUrl, false)) {
+  if (portOccupied) {
     const usable = await checkHttp(serverUrl, true)
     log(`[boot] 3080 已被占用（可用=${usable}）`)
     if (!usable) {
@@ -975,9 +1057,21 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
-    setupAutoUpdater()
-    createTray()
+    // 启动关键路径优先：先拉起窗口与 dsh（用户真正等待的部分），
+    // 托盘与自动更新初始化放到下一个事件循环，避免抢占首屏时间。
     boot()
+    setImmediate(() => {
+      try {
+        setupAutoUpdater()
+      } catch (e) {
+        console.error('[updater] 初始化失败：', e)
+      }
+      try {
+        createTray()
+      } catch (e) {
+        console.error('[tray] 初始化失败：', e)
+      }
+    })
   })
 
   app.on('activate', () => {
